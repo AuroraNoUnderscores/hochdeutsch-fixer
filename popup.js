@@ -1,0 +1,58 @@
+const $ = id => document.getElementById(id);
+let host = null;
+
+async function refresh() {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  let page = null;
+  try { page = await browser.tabs.sendMessage(tab.id, 'hd-status'); } catch {}
+  let llm = null;
+  try { llm = await browser.runtime.sendMessage({ type: 'llm-status' }); } catch {}
+  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm']);
+
+  $('enabled').checked = s.enabled !== false;
+  $('mode').value = s.mode || 'hamburg';
+  $('llm').checked = s.llm !== false;
+
+  if (page) {
+    host = page.host;
+    $('site-label').textContent = host;
+    $('site').checked = !(s.disabledSites || []).includes(host);
+    $('count').textContent = page.active
+      ? `${page.count} replacement${page.count === 1 ? '' : 's'} on this page`
+      : 'Off on this page';
+  } else {
+    $('site-row').hidden = true;
+    $('count').textContent = 'Not available on this page.';
+  }
+
+  const bar = $('bar');
+  bar.hidden = true;
+  if (s.llm === false) $('llm-status').textContent = 'Model off — rules only.';
+  else if (!llm || llm.status === 'idle') $('llm-status').textContent = 'Model loads when a page needs it.';
+  else if (llm.status === 'loading') {
+    $('llm-status').textContent = `Downloading model… ${llm.progress}%`;
+    bar.hidden = false;
+    bar.firstElementChild.style.width = `${llm.progress}%`;
+  } else if (llm.status === 'error') $('llm-status').textContent = `Model error: ${llm.error}`;
+  else $('llm-status').textContent = `Model ready — ${llm.decided} decision${llm.decided === 1 ? '' : 's'} made.`;
+}
+
+const later = () => setTimeout(refresh, 150);
+
+$('enabled').onchange = e => browser.storage.local.set({ enabled: e.target.checked }).then(later);
+$('mode').onchange = e => browser.storage.local.set({ mode: e.target.value }).then(later);
+$('llm').onchange = async e => {
+  await browser.storage.local.set({ llm: e.target.checked });
+  if (e.target.checked) browser.runtime.sendMessage({ type: 'llm-load' }).catch(() => {});
+  later();
+};
+$('site').onchange = async e => {
+  const { disabledSites = [] } = await browser.storage.local.get('disabledSites');
+  const sites = disabledSites.filter(h => h !== host);
+  if (!e.target.checked) sites.push(host);
+  await browser.storage.local.set({ disabledSites: sites });
+  later();
+};
+
+refresh();
+setInterval(refresh, 1000);

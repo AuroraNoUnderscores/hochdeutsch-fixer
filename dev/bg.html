@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>background check</title>
+<body style="white-space:pre;font-family:monospace"></body>
+<script>
+  // Stub of the extension API: capture the listener background.js registers.
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  window.__listeners = [];
+  window.browser = {
+    storage: { local: { get: async () => ({ llm: true }) } },
+    runtime: { onMessage: { addListener: fn => window.__listeners.push(fn) } },
+  };
+</script>
+<script type="module" src="../background.js"></script>
+<script type="module">
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  await new Promise(r => setTimeout(r, 100));
+  const fn = window.__listeners[0];
+  log(`listeners registered: ${window.__listeners.length}`);
+  log(`status: ${JSON.stringify(await fn({ type: 'llm-status' }))}`);
+  const jobs = [
+    { q: 0, key: 'ss:strasse', cf: true, texts: ['Wir wohnen an der Strasse.', 'Wir wohnen an der Straße.'] },
+    { q: 1, texts: ['Er musste eine Busse zahlen.', 'Er musste eine Geldstrafe zahlen.'] },
+  ];
+  const t = performance.now();
+  log(`picks: ${JSON.stringify(await fn({ type: 'rank', jobs }))} in ${(performance.now() - t).toFixed(0)}ms`);
+  const t2 = performance.now();
+  log(`cached picks: ${JSON.stringify(await fn({ type: 'rank', jobs }))} in ${(performance.now() - t2).toFixed(0)}ms`);
+  log(`status: ${JSON.stringify(await fn({ type: 'llm-status' }))}`);
+</script>

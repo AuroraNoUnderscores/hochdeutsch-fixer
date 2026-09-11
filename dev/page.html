@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="de-CH">
+<meta charset="utf-8">
+<title>Velo-Demo mit Spass</title>
+<body>
+<p id="a">Grüezi! Ich habe mein Velo auf dem Trottoir parkiert, weil es keinen Veloweg gab.</p>
+<p id="b">Der Entscheid kostet 1'250'000 Franken. Er war knapp, und das macht keinen Spass.</p>
+<p id="c">Er musste eine Busse zahlen. Wir brauchen die genauen Masse des Zimmers.</p>
+<p id="d">Das Tram kommt gleich. Es ist immer voll am Samstag.</p>
+<p id="e" lang="fr">Une glace au café, merci.</p>
+<div lang="en"><p id="i">Hoi Anna, ich habe mein Velo am Bahnhof parkiert. Gruss, Max</p></div>
+<div lang="en"><p id="j">The bus leaves at noon. Please bring your ticket and a hat.</p></div>
+<pre id="f">const velo = "Strasse";</pre>
+<input id="g" value="Mein Velo">
+<p id="h"></p>
+<div id="result" style="white-space:pre;font-family:monospace"></div>
+
+<script>
+  // Stub of the extension API so content.js runs on a plain page.
+  window.__rankReady = new Promise(r => { window.__setRank = r; });
+  window.browser = {
+    storage: {
+      local: { get: async () => ({ mode: 'hamburg', llm: true }), set: async () => {} },
+      onChanged: { addListener() {} },
+    },
+    runtime: {
+      onMessage: { addListener() {} },
+      sendMessage: async msg => {
+        if (msg?.type === 'rank') return (await window.__rankReady)(msg.jobs);
+        return null;
+      },
+    },
+  };
+</script>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../engine.js"></script>
+<script src="../content.js"></script>
+<script>
+  setTimeout(() => { document.getElementById('h').textContent = 'Nachgeladen: Die Velofahrer grüssen.'; }, 50);
+</script>
+<script type="module">
+  import { load, score } from '../llm.js';
+  const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
+  await load();
+  window.__setRank(async jobs => {
+    const picks = [];
+    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    return picks;
+  });
+
+  const want = {
+    a: 'Moin! Ich habe mein Fahrrad auf dem Bürgersteig geparkt, weil es keinen Radweg gab.',
+    b: 'Die Entscheidung kostet 1.250.000 Franken. Sie war knapp, und das macht keinen Spaß.',
+    c: 'Er musste eine Geldstrafe zahlen. Wir brauchen die genauen Maße des Zimmers.',
+    d: 'Die Straßenbahn kommt gleich. Sie ist immer voll am Sonnabend.',
+    e: 'Une glace au café, merci.',
+    f: 'const velo = "Strasse";',
+    i: 'Moin Anna, ich habe mein Fahrrad am Bahnhof geparkt. Gruß, Max',
+    j: 'The bus leaves at noon. Please bring your ticket and a hat.',
+    h: 'Nachgeladen: Die Radfahrer grüßen.',
+  };
+  await new Promise(r => setTimeout(r, 4000)); // let the model pass finish
+  let fail = 0;
+  for (const [id, exp] of Object.entries(want)) {
+    const got = document.getElementById(id).textContent;
+    if (got !== exp) { fail++; log(`FAIL #${id}\n  want: ${exp}\n  got:  ${got}`); }
+  }
+  const input = document.getElementById('g').value;
+  if (input !== 'Mein Velo') { fail++; log(`FAIL input: ${input}`); }
+  log(`title: ${document.title}`);
+  log(`${Object.keys(want).length + 1 - fail}/${Object.keys(want).length + 1} passed`);
+</script>
+</body>
+</html>

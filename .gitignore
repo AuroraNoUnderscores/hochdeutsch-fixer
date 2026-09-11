@@ -1,0 +1,12 @@
+# OS / editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# build output
+*.xpi
+*.zip
+web-ext-artifacts/

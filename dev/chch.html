@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<title>ch.ch fixture</title>
+<body>
+<main id="src">
+<h1>Tempolimit und Geschwindigkeitsüberschreitungen</h1>
+<p>Wie hoch sind die Bussen für zu schnelles Fahren?</p>
+<h3>Geldbusse oder Anzeige</h3>
+<p>Wenn Sie die zulässige Höchstgeschwindigkeit überschreiten, müssen Sie mit folgenden Bussen (in Franken) bzw. einer Anzeige rechnen:</p>
+<table><tbody>
+<tr><td>Innerorts</td><td>Überschreitung um 16-20 km/h</td><td>Verwarnung</td></tr>
+<tr><td>Ausserorts</td><td>Überschreitung um 21-25 km/h</td><td>1 Monat Entzug (mindestens)</td></tr>
+<tr><td>Autobahn</td><td>Überschreitung um 35 km/h und mehr</td><td>3 Monate Entzug (mindestens)</td></tr>
+</tbody></table>
+<p>Wer zu schnell fährt, muss mit einer Busse rechnen. Die Polizei kann den Führerausweis entziehen.</p>
+<ul>
+<li>innerorts mindestens 40 km/h zu schnell fährt;</li>
+<li>ausserorts mindestens 60 km/h zu schnell fährt;</li>
+<li>Das Velo auf dem Trottoir parkieren ist verboten; es droht eine Ordnungsbusse von 40 Franken.</li>
+</ul>
+<p>Der Entscheid des Strassenverkehrsamts kann mit einem Rekurs angefochten werden. Er muss innert 30 Tagen eingereicht werden.</p>
+</main>
+<hr>
+<div id="result" style="white-space:pre-wrap;font-family:monospace"></div>
+
+<script>
+  window.__rankReady = new Promise(r => { window.__setRank = r; });
+  window.__before = [...document.querySelectorAll('#src h1,#src h3,#src p,#src td,#src li')].map(n => n.textContent);
+  window.browser = {
+    storage: {
+      local: { get: async () => ({ mode: 'neutral', llm: true }), set: async () => {} },
+      onChanged: { addListener() {} },
+    },
+    runtime: { onMessage: { addListener() {} }, sendMessage: async m => m?.type === 'rank' ? (await window.__rankReady)(m.jobs) : null },
+  };
+</script>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../engine.js"></script>
+<script src="../content.js"></script>
+<script type="module">
+  import { load, score } from '../llm.js';
+  await load();
+  window.__setRank(async jobs => {
+    const picks = [];
+    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    return picks;
+  });
+  await new Promise(r => setTimeout(r, 5000));
+  const after = [...document.querySelectorAll('#src h1,#src h3,#src p,#src td,#src li')].map(n => n.textContent);
+  const out = [];
+  window.__before.forEach((b, i) => { if (b !== after[i]) out.push(`- ${b}\n+ ${after[i]}`); });
+  document.getElementById('result').textContent = out.length ? out.join('\n\n') : '(no changes)';
+</script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rules + baby LLM</title>
+<body style="white-space:pre;font-family:monospace"></body>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../engine.js"></script>
+<script type="module">
+  import { load, score } from '../llm.js';
+  const E = globalThis.HD_ENGINE;
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+
+  const rank = async jobs => {
+    const picks = [];
+    for (const j of jobs) {
+      const s = await score(j.texts);
+      picks.push(s.indexOf(Math.max(...s)));
+    }
+    return picks;
+  };
+
+  // [input, expected after the model decides, mode]
+  const cases = [
+    ['Er musste eine Busse von 200 Franken zahlen.', 'Er musste eine Geldstrafe von 200 Franken zahlen.'],
+    ['Die Busse fahren alle zehn Minuten.', 'Die Busse fahren alle zehn Minuten.'],
+    ['Wir brauchen die genauen Masse des Zimmers.', 'Wir brauchen die genauen Maße des Zimmers.'],
+    ['Die Masse des Körpers beträgt 5 kg.', 'Die Masse des Körpers beträgt 5 kg.'],
+    ['Das Floss treibt den Fluss hinunter.', 'Das Floß treibt den Fluss hinunter.'],
+    ['Er parkiert das Auto.', 'Er parkt das Auto.'],
+    ['Das Auto wurde falsch parkiert.', 'Das Auto wurde falsch geparkt.'],
+    ['Der Entscheid ist gefallen. Er war knapp.', 'Die Entscheidung ist gefallen. Sie war knapp.'],
+    ['Das Meitli isst ein Guetzli.', 'Die Deern isst einen Keks.', 'hamburg'],
+    ['Wir zügeln am Samstag nach Bern.', 'Wir ziehen am Sonnabend nach Bern um.', 'hamburg'],
+    ['Wir haben letzte Woche gezügelt.', 'Wir sind letzte Woche umgezogen.'],
+    ['Zieh deine Finken an!', 'Zieh deine Hausschuhe an!'],
+    ['Die Finken zwitschern.', 'Die Finken zwitschern.'],
+    ['Das Velo, das ich gekauft habe, ist rot.', 'Das Fahrrad, das ich gekauft habe, ist rot.'],
+    ['Der Unterbruch dauerte lange. Er war teuer.', 'Die Unterbrechung dauerte lange. Sie war teuer.'],
+  ];
+
+  const t0 = performance.now();
+  await load(p => { if (p.status === 'done') log(`${p.file} ready`); });
+  log(`model ready in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
+
+  let fail = 0;
+  for (const [input, want, mode = 'neutral'] of cases) {
+    const t = performance.now();
+    const r = E.convert(input, { mode });
+    await E.resolve(r.pieces, rank);
+    const got = E.renderPieces(r.pieces);
+    const ms = (performance.now() - t).toFixed(0);
+    if (got !== want) { fail++; log(`FAIL (${ms}ms)\n  in:   ${input}\n  want: ${want}\n  got:  ${got}`); }
+    else log(`ok (${ms}ms)  ${got}`);
+  }
+  log(`\n${cases.length - fail}/${cases.length} passed`);
+</script>

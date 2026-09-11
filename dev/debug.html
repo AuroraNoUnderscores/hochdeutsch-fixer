@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>score debug</title>
+<body style="white-space:pre;font-family:monospace"></body>
+<script type="module">
+  import { load, score } from '../llm.js';
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  const { tokenizer } = await load();
+  const sets = [
+    ['Er parkt das Auto.', 'Er geparkt das Auto.'],
+    ['Die Entscheidung ist gefallen. Er war knapp.', 'Die Entscheidung ist gefallen. Sie war knapp.'],
+    ['Die Unterbrechung dauerte lange. Er war teuer.', 'Die Unterbrechung dauerte lange. Sie war teuer.'],
+    ['Das Fahrrad ist weg. Es war teuer.', 'Das Fahrrad ist weg. Sie war teuer.'],
+    ['Es regnet seit gestern.', 'Sie regnet seit gestern.'],
+  ];
+  for (const s of sets) {
+    const sc = await score(s);
+    s.forEach((t, i) => log(`${sc[i].toFixed(2)}  (${tokenizer(t).input_ids.data.length} tok)  ${t}`));
+    log('');
+  }
+</script>

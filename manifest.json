@@ -1,0 +1,30 @@
+{
+  "manifest_version": 2,
+  "name": "Hochdeutsch-Fixer",
+  "version": "2.1.0",
+  "description": "Replaces Swiss Standard German (Velo, parkieren, Spass …) with German Standard German, with a Hamburg flavour and a local baby LLM for the tricky calls.",
+  "icons": { "48": "icon.svg", "96": "icon.svg" },
+  "permissions": ["storage", "unlimitedStorage", "<all_urls>"],
+  "browser_action": {
+    "default_icon": "icon.svg",
+    "default_title": "Hochdeutsch-Fixer",
+    "default_popup": "popup.html"
+  },
+  "background": { "page": "background.html" },
+  "content_security_policy": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dictionary.js", "morph.js", "engine.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "hochdeutsch-fixer@addons.local",
+      "strict_min_version": "115.0",
+      "data_collection_permissions": { "required": ["none"] }
+    }
+  }
+}
