@@ -89,6 +89,20 @@ const cases = [
   ['Das Velo ist weg. Es war teuer.', 'Das Fahrrad ist weg. Es war teuer.'],
   ['Auf dem Trottoir parkieren ist verboten; es droht eine Busse.', 'Auf dem Bürgersteig parken ist verboten; es droht eine Geldstrafe.'],
 
+  // text about words, not using them: left exactly as it is (verstaendlich.ch)
+  ['Sowohl Mass (1) wie auch Masse (2) werden in der Mehrzahl zu Massen.',
+   'Sowohl Mass (1) wie auch Masse (2) werden in der Mehrzahl zu Massen.'],
+  ['Verantwortlich für diese Doppeldeutigkeit ist das Wort Massen.',
+   'Verantwortlich für diese Doppeldeutigkeit ist das Wort Massen.'],
+  ['In der Schweiz sagt man Velo, in Deutschland Fahrrad.',
+   'In der Schweiz sagt man Velo, in Deutschland Fahrrad.'],
+  ['Zur Rechtschreibung: Man schreibt Strasse in der Schweiz ohne ß.',
+   'Zur Rechtschreibung: Man schreibt Strasse in der Schweiz ohne ß.'],
+  ['Er stellte das Velo an die Strasse.', 'Er stellte das Fahrrad an die Straße.'], // one weak cue is not enough
+  ['Er schrieb «Velo» an die Tafel und fuhr mit dem Velo davon.',
+   'Er schrieb «Velo» an die Tafel und fuhr mit dem Fahrrad davon.'],
+  ['Masse und Maße sind zwei Wörter.', 'Masse und Maße sind zwei Wörter.'],
+
   // Hamburg mode
   ['Ich kaufe zwei Weggli.', 'Ich kaufe zwei Rundstücke.', 'hamburg'],
   ['Am Samstag sind die Brötchen frisch.', 'Am Sonnabend sind die Rundstücke frisch.', 'hamburg'],

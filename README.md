@@ -26,6 +26,22 @@ Two passes over every text node:
 The model never writes text. It only ranks candidates the rules produced, so the
 worst it can do is pick the wrong one of them. It runs on WASM, no GPU needed.
 
+### Text about words is left alone
+
+A page explaining that "Mass (1) und Masse (2) werden in der Mehrzahl zu Massen"
+must keep its examples, and so must "in der Schweiz sagt man Velo". No model can
+catch this — both spellings read perfectly naturally — so it is detected instead,
+at three levels, each reverting anything already changed:
+
+- **Page**: a strong cue (Rechtschreibung, Eszett, Duden, Grammatik, Helvetismus …)
+  or two weaker ones in the title and text switch the extension off for the page.
+  The popup then says so.
+- **Sentence**: one cue (das Wort, Mehrzahl, sagt man, Aussprache …) suppresses
+  that sentence only, so a single explaining line in an ordinary article is safe.
+- **Word**: a word in quotes («Velo»), or inside `em`/`i`/`q`/`cite`/`dfn` with
+  at most three words, is being named rather than used. A word is also left alone
+  when the other spelling appears nearby, since the text is comparing them.
+
 ### What each side decides
 
 | Decision | Who | Why |
@@ -72,6 +88,8 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 - `dev/bg.html` — background page: model loading, ranking, caching.
 - `dev/chch.html` — a real page (ch.ch speeding fines) run through the content
   script, printing a before/after diff.
+- `dev/meta.html` — a real page about the words themselves (verstaendlich.ch on
+  Mass/Masse/Massen), which must come out unchanged.
 - `dev/debug.html` — prints raw scores for candidate sentences.
 
 `test.js` also runs under `node test.js` if Node is available.
@@ -88,4 +106,7 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
   stops at the next noun, so a distant reference stays as it was.
 - The model is small. It is good at spelling, articles and word choice in a
   sentence, and knows nothing about the world beyond that.
+- The language-page detection is deliberately eager: a page that discusses
+  spelling in passing is left untouched entirely, which is the safer of the two
+  mistakes. The popup tells you when that is why nothing changed.
 - First use downloads ~92 MB. Until it finishes, choices keep their defaults.

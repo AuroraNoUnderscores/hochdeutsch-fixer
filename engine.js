@@ -19,6 +19,35 @@
   const INDEF = /^(?:ein|eine|einen|einem|einer|eines|kein|keine|keinen|keinem|keiner|keines)$/i;
   const NUMERALS = new Set('zwei drei vier fünf sechs sieben acht neun zehn elf zwölf viele mehrere einige beide alle wenige zahlreiche'.split(' '));
 
+  const META_STRONG = new RegExp(D.meta.strong, 'i');
+  const META_WEAK = new RegExp(D.meta.weak, 'gi');
+  const OPEN_QUOTE = /[«„“‚‹"'»]\s*$/;
+  const CLOSE_QUOTE = /^\s*[»“”‘›"'«]/;
+
+  const weakCues = text => new Set((text.match(META_WEAK) || []).map(m => m.toLowerCase())).size;
+
+  // Is this text talking about words rather than using them? A page or block
+  // needs a strong cue or two weak ones; a single sentence needs only one,
+  // since "in der Mehrzahl zu Massen" is already about the word.
+  function isMeta(text, sentence) {
+    if (!text) return false;
+    return META_STRONG.test(text) || weakCues(text) >= (sentence ? 1 : 2);
+  }
+
+  // Per-sentence verdicts for one text, so one explaining sentence in an
+  // ordinary paragraph suppresses only itself.
+  function metaSentences(text) {
+    const spans = [];
+    const re = /[.!?]+(?:\s|$)/g;
+    let start = 0, m;
+    while ((m = re.exec(text))) {
+      spans.push({ end: re.lastIndex, meta: isMeta(text.slice(start, re.lastIndex), true) });
+      start = re.lastIndex;
+    }
+    if (start < text.length) spans.push({ end: text.length, meta: isMeta(text.slice(start), true) });
+    return spans;
+  }
+
   const isUpper = c => c !== c.toLowerCase();
   const allCaps = w => w.length > 1 && w === w.toUpperCase() && w !== w.toLowerCase();
   const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -182,10 +211,19 @@
     return { options: [w, ...variants], pick: 0, key: 'ss:' + lower, cf: !ssContext.has(lower) };
   }
 
+  // A word in quotes is being named, not used: «Velo», „Mass“.
+  const quoted = (tokens, i) =>
+    OPEN_QUOTE.test(tokens[i - 1]?.s || '') && CLOSE_QUOTE.test(tokens[i + 1]?.s || '');
+
   function wordPass(t, text, tokens, context) {
     const haystack = (context ? context + ' ' : '') + text;
-    for (const tok of tokens) {
-      if (!tok.w) continue;
+    const spans = metaSentences(text);
+    let span = 0;
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (!tok.w || quoted(tokens, i)) continue;
+      while (span < spans.length - 1 && tok.at >= spans[span].end) span++;
+      if (spans[span]?.meta) continue; // this sentence is explaining a word
       const w = tok.w;
       const noun = findNoun(t, w);
       if (noun) { tok.noun = noun; continue; }
@@ -205,9 +243,12 @@
       const lower = w.toLowerCase();
       if (D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { tok.zuegeln = true; continue; }
       const s = fixSS(compound(t, w) ?? w);
-      if (s !== w) { tok.s = s; continue; }
+      // Both spellings in one text means they are being contrasted ("Masse" vs
+      // "Maße"), so touching either one wrecks the comparison.
+      if (s !== w && !contrasted(haystack, w, s)) { tok.s = s; continue; }
+      if (s !== w) continue;
       const c = ssChoice(w);
-      if (c) tok.piece = c;
+      if (c && !c.options.some(o => o !== w && contrasted(haystack, w, o))) tok.piece = c;
     }
   }
 
@@ -314,6 +355,12 @@
     }
   }
 
+  // True when the text already shows both spellings, i.e. it is comparing them.
+  function contrasted(haystack, from, to) {
+    if (from === to) return false;
+    return new RegExp(`(?<!\\p{L})${to}(?!\\p{L})`, 'iu').test(haystack);
+  }
+
   // "es" in "weil es keinen Veloweg gab" or "es droht eine Geldstrafe" refers to
   // nothing — an impersonal verb, or the real subject following as an indefinite
   // noun phrase. Look to the end of the clause.
@@ -401,6 +448,10 @@
 
   function convert(text, opts = {}) {
     const t = tables(opts.mode || 'hamburg');
+    // Pages and blocks explaining words keep their examples ("sagt man Velo",
+    // "in der Mehrzahl zu Massen"); rewriting those would say the opposite.
+    if (opts.meta || isMeta((opts.context ? opts.context + ' ' : '') + text))
+      return { text, changes: 0, fixed: 0, pieces: [text] };
     let changes = 0;
     if (t.phraseRe) text = text.replace(t.phraseRe, m => { changes++; return t.phraseMap.get(m); });
     text = text.replace(THOUSANDS, (m, int, dec) => {
@@ -448,7 +499,7 @@
     return moved;
   }
 
-  const api = { convert, candidates, renderPieces, resolve, countChoices, matchCase };
+  const api = { convert, candidates, renderPieces, resolve, countChoices, isMeta, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);

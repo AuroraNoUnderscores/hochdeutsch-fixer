@@ -229,6 +229,16 @@ globalThis.HD_DICT = {
     },
   },
 
+  // Text that talks *about* words must be left alone: rewriting the examples in
+  // "Sowohl Mass (1) wie auch Masse (2) werden in der Mehrzahl zu Massen"
+  // destroys the sentence, and no language model can tell, because both
+  // spellings read perfectly naturally. One strong cue, or two weak ones,
+  // switch the extension off for that page or block.
+  meta: {
+    strong: 'rechtschreibung|schreibweise|orthografi|orthographi|eszett|scharfes s|ss oder ß|ß oder ss|\\bduden\\b|grammatik|deutsch als fremdsprache|sprachblog|helvetism|sprachgebrauch|wortherkunft|etymologi',
+    weak: 'das wort|die wörter|dem wort|der begriff|den begriff|ausdruck|mehrzahl|einzahl|\\bplural\\b|\\bsingular\\b|buchstabe|silbe|aussprache|schreibt man|sagt man|nennt man|heisst es|heißt es|gleich lautend|doppeldeutig|bedeutet|bedeutung|gesprochene sprache|übersetzt|wörtlich|dialekt|mundart|hochdeutsch|standarddeutsch',
+  },
+
   // "zügeln" = move house (separable "umziehen"), but also "rein in".
   zuegeln: {
     finite: { zügle: 'ziehe', zügelst: 'ziehst', zügelt: 'zieht', zügeln: 'ziehen', zügelte: 'zog', zügeltest: 'zogst', zügelten: 'zogen', zügeltet: 'zogt' },

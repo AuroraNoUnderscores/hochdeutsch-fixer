@@ -17,9 +17,9 @@ async function refresh() {
     host = page.host;
     $('site-label').textContent = host;
     $('site').checked = !(s.disabledSites || []).includes(host);
-    $('count').textContent = page.active
-      ? `${page.count} replacement${page.count === 1 ? '' : 's'} on this page`
-      : 'Off on this page';
+    $('count').textContent = !page.active ? 'Off on this page'
+      : page.meta ? 'Page is about language — left as is'
+      : `${page.count} replacement${page.count === 1 ? '' : 's'} on this page`;
   } else {
     $('site-row').hidden = true;
     $('count').textContent = 'Not available on this page.';

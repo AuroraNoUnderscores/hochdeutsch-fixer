@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<title>Das Mass ist voll: Dasselbe ist das Gegenteil.</title>
+<body>
+<article id="src">
+<h1>Das Mass ist voll: Dasselbe ist das Gegenteil.</h1>
+<p>Vor einiger Zeit meldete „20 Minuten“, dass Bier gesund sei. Unter dem Bild einer biertrinkenden Frau stand geschrieben:</p>
+<p>Bier – in Massen genossen – ist gesünder, als bisher angenommen wurde.</p>
+<p>Der Satz kann tatsächlich beides bedeuten, und ganz allein für diese Doppeldeutigkeit verantwortlich ist das Wort Massen. Es ist eine Mehrzahlform, die sich zwei Wörter teilen:</p>
+<p>Sowohl Mass (1) wie auch Masse (2) werden in der Mehrzahl zu Massen. Zu unterscheiden sind sie dann nur noch durch ein langes oder kurzes A, was aber natürlich nur in der gesprochenen Sprache weiterhilft.</p>
+<p>Steht das Mass (1) mit langem A hinter in Massen, bedeutet der Ausdruck soviel wie „massvoll“, also in vernünftigem Mass.</p>
+<p>Tatsächlich hilft das hochdeutsche Eszett in diesem Fall bei der Unterscheidung: Das Mass (1) nämlich wird in Deutschland Maß (1) geschrieben, die Masse (2) aber wie in der Schweiz mit ss.</p>
+<p>Übrigens sagt man in der Schweiz Velo, in Deutschland Fahrrad.</p>
+</article>
+<hr>
+<div id="result" style="white-space:pre-wrap;font-family:monospace"></div>
+
+<script>
+  window.__rankReady = new Promise(r => { window.__setRank = r; });
+  window.__before = [...document.querySelectorAll('#src h1,#src p')].map(n => n.textContent);
+  window.browser = {
+    storage: {
+      local: { get: async () => ({ mode: 'neutral', llm: true }), set: async () => {} },
+      onChanged: { addListener() {} },
+    },
+    runtime: { onMessage: { addListener(fn) { window.__status = fn; } }, sendMessage: async m => m?.type === 'rank' ? (await window.__rankReady)(m.jobs) : null },
+  };
+</script>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../engine.js"></script>
+<script src="../content.js"></script>
+<script type="module">
+  import { load, score } from '../llm.js';
+  await load();
+  window.__setRank(async jobs => {
+    const picks = [];
+    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    return picks;
+  });
+  await new Promise(r => setTimeout(r, 4000));
+  const after = [...document.querySelectorAll('#src h1,#src p')].map(n => n.textContent);
+  const diff = window.__before.map((b, i) => b === after[i] ? null : `- ${b}\n+ ${after[i]}`).filter(Boolean);
+  const status = await window.__status('hd-status');
+  document.getElementById('result').textContent =
+    (diff.length ? `CHANGED ${diff.length}:\n${diff.join('\n\n')}` : 'unchanged (correct)') +
+    `\nstatus: meta=${status.meta} count=${status.count}`;
+</script>
+</body>
+</html>

@@ -6,14 +6,29 @@
   const E = globalThis.HD_ENGINE;
   const originals = new Map(); // text node -> { orig, conv, counted }
   let host = location.hostname;
-  let mode = 'hamburg', llm = true, count = 0, active = false, observer = null;
+  let mode = 'hamburg', llm = true, count = 0, active = false, observer = null, pageMeta = false;
   const queue = [];
   let pumping = false;
 
   const SKIP = 'script,style,noscript,textarea,input,select,code,pre,kbd,samp,[contenteditable=""],[contenteditable="true"]';
+  // Italics, quotes and definition markup around a word or two name the word
+  // rather than use it: "in der Schweiz sagt man <em>Velo</em>".
+  const MENTION = 'em,i,q,cite,dfn,abbr,var,blockquote';
   const BLOCK = 'p,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dd,dt,section,article,main,div,body';
   const GERMAN = /\b(der|die|das|den|dem|des|und|ist|sind|war|nicht|mit|für|ein|eine|einen|einem|von|zu|zum|zur|auf|sich|wir|wird|werden|auch|aber|oder|im|am|beim|vom|bei|dass|haben|hat|habe|hast|hatte|kann|muss|nach|über|nur|noch|wie|was|schon|sehr|man|als|wenn|ich|mir|mich|dir|uns|euch|bin|bist|mein|meine|dein|sein|seine|kein|keine|wurde|bitte|danke|viele|heute|gestern|jetzt|hier|dort)\b/gi;
   const blocks = new WeakMap();
+
+  // Text of an element as a reader sees it: script and style contents would
+  // otherwise count towards the language check and the topic cues.
+  function visibleText(el) {
+    const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => n.parentElement?.closest('script,style,noscript,template')
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    let out = '';
+    for (let n; (n = tw.nextNode()) && out.length < 3000;) out += n.nodeValue + ' ';
+    return out.slice(0, 3000);
+  }
 
   // The block a text node sits in: its text decides the language, and gives the
   // rules the topic they need for words like "Busse" (fine, or buses?).
@@ -25,7 +40,7 @@
     const len = el.textContent.length;
     let info = blocks.get(el);
     if (!info || Math.abs(info.len - len) > 40) {
-      const text = el.textContent.slice(0, 3000);
+      const text = visibleText(el);
       const hits = (text.match(GERMAN) || []).length;
       info = { len, text, german: hits >= 2 || (hits >= 1 && /[äöüßÄÖÜ]/.test(text)) };
       blocks.set(el, info);
@@ -36,6 +51,8 @@
   function eligible(node) {
     const el = node.parentElement;
     if (!el || el.isContentEditable || el.closest(SKIP)) return false;
+    const mention = el.closest(MENTION);
+    if (mention && mention.textContent.trim().split(/\s+/).length <= 3) return false;
     // A page's lang is often its interface language, not the text's: webmail
     // shows German mail inside lang="en". So German-looking text counts too.
     const lang = el.closest('[lang]')?.lang;
@@ -51,7 +68,7 @@
   function fix(node) {
     if (originals.get(node)?.conv === node.nodeValue) return; // our own write
     if (!eligible(node)) return;
-    const r = E.convert(node.nodeValue, { mode, context: blockInfo(node).text });
+    const r = E.convert(node.nodeValue, { mode, meta: pageMeta, context: blockInfo(node).text });
     const choices = r.pieces.some(p => typeof p === 'object');
     if (!r.changes && !choices) return;
     const rec = { orig: node.nodeValue, conv: r.changes ? r.text : node.nodeValue, counted: r.changes };
@@ -93,9 +110,24 @@
     for (let n; (n = tw.nextNode());) fix(n);
   }
 
+  // A whole page about language (a spelling blog, a dictionary entry) is left
+  // alone, not just the paragraphs whose own text gives it away. Anything
+  // already changed is put back.
+  function checkPageMeta() {
+    if (pageMeta) return;
+    const t = document.title + ' ' + (document.body?.innerText || '').slice(0, 6000);
+    if (!E.isMeta(t)) return;
+    pageMeta = true;
+    revert();
+  }
+
   function start() {
     active = true;
+    pageMeta = false;
+    checkPageMeta();
+    if (pageMeta) return;
     walk(document.documentElement);
+    setTimeout(checkPageMeta, 1500); // late-rendered articles
     observer = new MutationObserver(muts => {
       for (const m of muts) {
         if (m.type === 'characterData') fix(m.target);
@@ -105,14 +137,18 @@
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
 
-  function stop() {
-    active = false;
+  function revert() {
     observer?.disconnect();
     observer = null;
     queue.length = 0;
     for (const [node, { orig, conv }] of originals) if (node.nodeValue === conv) node.nodeValue = orig;
     originals.clear();
     count = 0;
+  }
+
+  function stop() {
+    active = false;
+    revert();
   }
 
   async function sync() {
@@ -132,7 +168,7 @@
   browser.storage.onChanged.addListener(sync);
   browser.runtime.onMessage.addListener(msg => {
     if (msg === 'hd-status' && window.top === window)
-      return Promise.resolve({ host, count, active, mode, pending: queue.length });
+      return Promise.resolve({ host, count, active, mode, meta: pageMeta, pending: queue.length });
   });
 
   (async () => {
