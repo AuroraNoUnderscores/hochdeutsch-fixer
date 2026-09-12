@@ -21,6 +21,7 @@
 <script src="rank.js"></script>
 <script type="module">
   import { load, score } from '../llm.js';
+  import { rank as sharedRank } from './ranker.js';
   const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
   const frame = document.getElementById('f');
   await new Promise(r => frame.contentDocument.readyState === 'complete' ? r() : frame.addEventListener('load', r));
@@ -30,7 +31,7 @@
   await load();
   const rank = async jobs => {
     const picks = [];
-    for (const j of jobs) { const s = await score(j.texts); picks.push(HD_PICK(s, j)); }
+    picks.push(...await sharedRank(jobs));
     return picks;
   };
   // Stub the extension API inside the frame, then inject exactly what the
@@ -39,7 +40,7 @@
     storage: { local: { get: async () => ({ mode: 'hamburg', llm: true }), set: async () => {} }, onChanged: { addListener() {} } },
     runtime: { onMessage: { addListener() {} }, sendMessage: async m => m?.type === 'rank' ? rank(m.jobs) : m?.type === 'top-host' ? 'claude.ai' : null },
   };
-  for (const f of ['../dictionary.js', '../morph.js', '../engine.js', '../content.js']) {
+  for (const f of ['../dictionary.js', '../morph.js', '../coverage.js', '../engine.js', '../content.js']) {
     const src = await (await fetch(f)).text();
     win.eval(src);
   }

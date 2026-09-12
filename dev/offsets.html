@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Token alignment check</title>
+<body style="white-space:pre;font-family:monospace;font-size:12px"></body>
+<script type="module">
+  // transformers.js has no offset mapping, so llm.js rebuilds it. This checks the
+  // rebuilt mapping against Python's (training/data/offsets.json): every ss pair
+  // must land on the same token the model was trained on.
+  import { AutoTokenizer } from '../vendor/transformers.min.js';
+  import { alignTokens } from '../llm.js';
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+
+  const rows = await (await fetch('../training/data/offsets.json')).json();
+  const tok = await AutoTokenizer.from_pretrained('onnx-community/distilbert-base-german-cased-ONNX');
+  let same = 0, differ = 0, lengthMismatch = 0;
+  const bad = [];
+  for (const r of rows) {
+    const tokens = tok.tokenize(r.swiss);
+    if (tokens.length !== r.n) lengthMismatch++;
+    const spans = alignTokens(r.swiss, tokens);
+    for (const [offset, want] of r.pairs) {
+      const got = spans.findIndex(s => s && s[0] <= offset && offset < s[1]);
+      if (got === want) same++;
+      else { differ++; if (bad.length < 10) bad.push(`want token ${want}, got ${got}: ${r.swiss.slice(Math.max(0, offset - 25), offset + 25)}`); }
+    }
+  }
+  log(`${same} of ${same + differ} ss pairs map to the same token as in Python`);
+  log(`${lengthMismatch} of ${rows.length} sentences tokenise to a different length`);
+  bad.forEach(b => log('  ' + b));
+</script>

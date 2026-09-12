@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Browser vs Python model parity</title>
+<body style="white-space:pre;font-family:monospace;font-size:12px"></body>
+<script type="module">
+  // The shipped int8 model must give the same probabilities in the browser
+  // (llm.js eszett) as in Python with onnxruntime (training/data/probs_py.json).
+  // A mismatch would mean the extension feeds the model differently than it
+  // was trained and graded.
+  import { eszett } from '../llm.js';
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  const rows = await (await fetch('../training/data/probs_py.json')).json();
+  let n = 0, worst = 0, flips = 0, missing = 0;
+  const bad = [];
+  for (const [i, r] of rows.entries()) {
+    if (i % 25 === 0) { document.title = `${i}/${rows.length}`; await new Promise(res => setTimeout(res, 0)); }
+    const js = await eszett(r.swiss, r.pairs.map(p => p[0]));
+    r.pairs.forEach(([at, py], k) => {
+      if (js[k] == null) { missing++; return; }
+      n++;
+      const d = Math.abs(js[k] - py);
+      worst = Math.max(worst, d);
+      if ((js[k] >= 0.5) !== (py >= 0.5)) flips++;
+      if (d > 0.02 && bad.length < 8) bad.push(`py ${py.toFixed(3)} js ${js[k].toFixed(3)}: ...${r.swiss.slice(Math.max(0, at - 25), at + 25)}...`);
+    });
+  }
+  log(`${n} pairs compared, ${missing} not aligned in the browser`);
+  log(`largest probability difference: ${worst.toFixed(4)}`);
+  log(`decisions that flip between Python and browser: ${flips}`);
+  bad.forEach(b => log('  ' + b));
+</script>

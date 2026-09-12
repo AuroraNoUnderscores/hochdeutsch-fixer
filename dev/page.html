@@ -34,6 +34,7 @@
 </script>
 <script src="../dictionary.js"></script>
 <script src="../morph.js"></script>
+<script src="../coverage.js"></script>
 <script src="../engine.js"></script>
 <script src="../content.js"></script>
 <script>
@@ -42,11 +43,12 @@
 <script src="rank.js"></script>
 <script type="module">
   import { load, score } from '../llm.js';
+  import { rank as sharedRank } from './ranker.js';
   const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
   await load();
   window.__setRank(async jobs => {
     const picks = [];
-    for (const j of jobs) { const s = await score(j.texts); picks.push(HD_PICK(s, j)); }
+    picks.push(...await sharedRank(jobs));
     return picks;
   });
 

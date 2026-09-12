@@ -116,7 +116,6 @@ globalThis.HD_DICT = {
     'Coiffeur/m/Coiffeure = Friseur/m/Friseure',
     'Coiffeuse/f/Coiffeusen = Friseurin/f/Friseurinnen',
     'Päckli/n/Päckli = Päckchen/n/Päckchen',
-    'Mass/n/- = Maß/n/-',
 
     // Leute
     'Bub/m/Buben = Junge/m/Jungen | sw gw',
@@ -176,8 +175,7 @@ globalThis.HD_DICT = {
     'Grüezi>Moin', 'Salü,Sali,Hoi>Hallo', 'Merci>Danke', 'vielmal>vielmals',
     'Exgüsi>Entschuldigung',
     // ß in strong past tenses (whole words only)
-    'sass,sassen,besass,besassen,vergass,vergassen,frass,frassen,assen>saß,saßen,besaß,besaßen,vergaß,vergaßen,fraß,fraßen,aßen',
-    'Grüss>Grüße', 'mass>maß',
+    'Grüss>Grüße',
   ],
 
   phrases: [
@@ -235,8 +233,14 @@ globalThis.HD_DICT = {
   // spellings read perfectly naturally. One strong cue, or two weak ones,
   // switch the extension off for that page or block.
   meta: {
-    strong: 'rechtschreibung|schreibweise|orthografi|orthographi|eszett|scharfes s|ss oder ß|ß oder ss|\\bduden\\b|grammatik|deutsch als fremdsprache|sprachblog|helvetism|sprachgebrauch|wortherkunft|etymologi',
-    weak: 'das wort|die wörter|dem wort|der begriff|den begriff|ausdruck|mehrzahl|einzahl|\\bplural\\b|\\bsingular\\b|buchstabe|silbe|aussprache|schreibt man|sagt man|nennt man|heisst es|heißt es|gleich lautend|doppeldeutig|bedeutet|bedeutung|gesprochene sprache|übersetzt|wörtlich|dialekt|mundart|hochdeutsch|standarddeutsch',
+    // Matched from the start of a word, so "Etymologie" and "etymologisch" count.
+    strong: 'rechtschreibung|schreibweise|orthografi|orthographi|eszett|scharfes s|ss oder ß|ß oder ss|duden|grammatik|deutsch als fremdsprache|sprachblog|helvetism|sprachgebrauch|wortherkunft|etymologi',
+    // Whole words only, and unmistakably about language: one flags its sentence.
+    // (As plain substrings "Silbe" fired on "Silbernes".)
+    sentence: 'das wort|die wörter|dem wort|der begriff|den begriff|dem begriff|mehrzahl|mehrzahlform|einzahl|plural|pluralform|singular|buchstaben?|silben?|aussprache|schreibt man|sagt man|nennt man|gleich lautende?n?|doppeldeutig(?:e|en|er|keit)?|gesprochenen? sprache',
+    // Whole words, but common in ordinary prose ("die lokale Bedeutung", "im
+    // Bericht heißt es"): they only count towards flagging a whole page or block.
+    weak: 'bedeutet|bedeutung|bedeutungen|ausdruck|übersetzt|wörtlich|heisst es|heißt es|dialekt|dialekte|mundart|hochdeutsch|hochdeutschen|standarddeutsch',
   },
 
   // Swiss grammar, not vocabulary.
@@ -307,6 +311,13 @@ globalThis.HD_DICT = {
   // Words where capitalisation alone settles the spelling: the noun is
   // capitalised ("ein Ass im Ärmel", "auf dem Schoß"), the past tense is not
   // ("ich aß", "er schoss daneben").
+  // The rules' answer for ß words the stem list misses. Only a fallback: with the
+  // model on, it decides these too ("Mass Effect" is a game, "Assen" a name).
+  ssWords: {
+    sass: 'saß', sassen: 'saßen', besass: 'besaß', besassen: 'besaßen', vergass: 'vergaß',
+    vergassen: 'vergaßen', frass: 'fraß', frassen: 'fraßen', assen: 'aßen', mass: 'maß', Mass: 'Maß',
+  },
+
   ssCase: {
     ass: { upper: 'Ass', lower: 'aß' },
     schoss: { upper: 'Schoß', lower: 'schoss' },

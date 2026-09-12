@@ -1,13 +1,20 @@
-// The baby LLM: a German DistilBERT (66M parameters, int8, ~92 MB) run locally
-// via transformers.js on WASM. It never writes text. It only ranks candidate
-// sentences that the rules produced, so its worst failure is picking the wrong
-// one of those candidates.
-import { AutoTokenizer, AutoModelForMaskedLM, Tensor, env } from './vendor/transformers.min.js';
+// The baby models, run locally via transformers.js on WASM. Neither writes text.
+//
+// - eszett: German DistilBERT fine-tuned on one job, deciding for every "ss" in
+//   Swiss text whether German spells it ß (training/). Bundled in models/.
+// - the general model: the same base model untouched, which ranks the few
+//   remaining candidates (article forms, wording) by how natural they sound.
+import { AutoTokenizer, AutoModelForMaskedLM, AutoModelForTokenClassification, Tensor, env } from './vendor/transformers.min.js';
 
 export const MODEL = 'onnx-community/distilbert-base-german-cased-ONNX';
+export const ESZETT = 'hdfx-eszett';
 const BATCH = 24;
 
-env.allowLocalModels = false;
+// The fine-tuned model ships inside the extension; the general one downloads.
+env.allowLocalModels = true;
+// Root-relative on purpose: transformers.js skips its local lookup for absolute
+// http(s) paths, and extension pages resolve "/models/" inside the extension.
+env.localModelPath = '/models/';
 env.backends.onnx.wasm.wasmPaths = {
   mjs: new URL('./vendor/ort-wasm-simd-threaded.asyncify.mjs', import.meta.url).href,
   wasm: new URL('./vendor/ort-wasm-simd-threaded.asyncify.wasm', import.meta.url).href,
@@ -70,4 +77,89 @@ export async function score(texts) {
     });
   }
   return scores;
+}
+
+let eszettLoading = null;
+
+export function loadEszett() {
+  eszettLoading ??= (async () => {
+    const tokenizer = await AutoTokenizer.from_pretrained(ESZETT);
+    const model = await AutoModelForTokenClassification.from_pretrained(ESZETT, { dtype: 'q8', device: 'wasm' });
+    return { tokenizer, model };
+  })();
+  eszettLoading.catch(() => { eszettLoading = null; });
+  return eszettLoading;
+}
+
+// Where each WordPiece token sits in the text. The tokenizer is cased and does
+// not strip accents, so every token is a substring of the text; transformers.js
+// has no offset mapping, so it is rebuilt here (and checked against Python's in
+// dev/offsets.html).
+// Whitespace, Unicode punctuation, and the ASCII symbols BERT also counts as punctuation.
+const BERT_SPLIT = /[\s\p{P}!-\/:-@\[-`{-~]/u;
+
+export function alignTokens(text, tokens) {
+  const out = [];
+  let pos = 0;
+  for (const t of tokens) {
+    if (t === '[UNK]') {
+      // An unknown word is one BERT pre-token: a run up to whitespace or any
+      // punctuation, which BERT always splits off ("cm³" in "500-cm³-Klasse").
+      while (pos < text.length && /\s/.test(text[pos])) pos++;
+      let end = pos + 1;
+      while (end < text.length && !BERT_SPLIT.test(text[end])) end++;
+      out.push([pos, end]);
+      pos = end;
+      continue;
+    }
+    const piece = t.startsWith('##') ? t.slice(2) : t;
+    let at = text.startsWith(piece, pos) ? pos : text.indexOf(piece, pos);
+    // only whitespace may be skipped between tokens; anything else means lost sync
+    if (at < 0 || /\S/.test(text.slice(pos, at))) { out.push(null); continue; }
+    out.push([at, at + piece.length]);
+    pos = at + piece.length;
+  }
+  return out;
+}
+
+// Chunks of at most ~1200 characters, cut at sentence ends, so long text stays
+// within the model's 512 tokens.
+function chunks(text) {
+  const out = [];
+  let start = 0;
+  const ends = [...text.matchAll(/[.!?]\s+/g)].map(m => m.index + m[0].length);
+  let last = 0;
+  for (const end of [...ends, text.length]) {
+    if (end - start > 1200 && last > start) { out.push([start, last]); start = last; }
+    last = end;
+  }
+  if (start < text.length) out.push([start, text.length]);
+  return out;
+}
+
+// Probability that the "ss" starting at each offset is ß in German spelling.
+// null where the text could not be aligned; the rules decide those.
+export async function eszett(text, offsets) {
+  const { tokenizer, model } = await loadEszett();
+  const probs = offsets.map(() => null);
+  for (const [a, b] of chunks(text)) {
+    const want = offsets.map((o, k) => [o, k]).filter(([o]) => o >= a && o < b);
+    if (!want.length) continue;
+    const piece = text.slice(a, b);
+    const tokens = tokenizer.tokenize(piece);
+    const enc = tokenizer(piece, { truncation: true, max_length: 512 });
+    if (enc.input_ids.dims[1] !== tokens.length + 2) continue;   // truncated: leave to the rules
+    const spans = alignTokens(piece, tokens);
+    const { logits } = await model(enc);
+    const L = logits.data, C = logits.dims[2];
+    for (const [o, k] of want) {
+      const rel = o - a;
+      const t = spans.findIndex(s => s && s[0] <= rel && rel < s[1]);
+      if (t < 0) continue;
+      const i = (t + 1) * C;                                     // +1 for [CLS]
+      const e0 = Math.exp(L[i]), e1 = Math.exp(L[i + 1]);
+      probs[k] = e1 / (e0 + e1);
+    }
+  }
+  return probs;
 }

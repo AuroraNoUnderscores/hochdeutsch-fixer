@@ -15,16 +15,34 @@ that signs it for free without listing it publicly.
 
 Two passes over every text node:
 
-1. **Rules** (`dictionary.js`, `morph.js`, `engine.js`) — run instantly. Where
-   they can't decide, they emit a *choice*: a list of candidate strings with a
-   safe default, so the page always reads correctly.
-2. **The baby LLM** (`llm.js`, hosted by `background.js`) — a German DistilBERT
-   (66M parameters, int8, ~92 MB), downloaded once from Hugging Face on first
-   use and cached. It scores each candidate sentence by pseudo-log-likelihood
-   (mask a token, ask how likely it is) and the best one replaces the default.
+1. **Rules** (`dictionary.js`, `morph.js`, `engine.js`) run instantly: vocabulary,
+   grammar, article agreement, and a first guess at every ss/ß. The page always
+   reads sensibly before any model has spoken.
+2. **Two small models** (`llm.js`, hosted by `background.js`), both German
+   DistilBERT running locally on WASM, no GPU needed:
+   - **eszett** — fine-tuned for this extension to decide, for every "ss", whether
+     German spells it ß. Bundled in `models/hdfx-eszett` (64 MB). It reads each
+     text once and settles every ss/ß in it. How it was trained is in
+     [training/](training/README.md).
+   - **general** — the untouched base model, downloaded once (~92 MB), which only
+     ranks the few remaining candidates: article forms and grammar wording.
 
-The model never writes text. It only ranks candidates the rules produced, so the
-worst it can do is pick the wrong one of them. It runs on WASM, no GPU needed.
+Neither model writes text: they choose among spellings and candidates the rules
+produced.
+
+### Why a trained model decides ss/ß, not rules
+
+On sentences from articles nobody tuned anything on, hand-written ss/ß rules got
+28.8 of every 1000 decisions wrong. The eszett model, trained on 1.17 million
+Wikipedia sentences whose correct spelling came for free (turn every ß into ss,
+and the original is the answer), gets 10.6 wrong end to end — including the
+collisions a list cannot settle: *die Masse strömte* vs *die Maße meines Koffers*,
+*ein Ass* vs *ich aß*, *keine Busse fahren* vs *eine Buße zahlen*.
+
+The rules' answer only stands where the model is unsure (probability between 0.4
+and 0.6), and a topic cue only outranks it for a spelling the model barely saw in
+training (`coverage.js`: plural "Bußen" occurred 3 times). On unseen text the
+cues are otherwise less reliable than the model.
 
 ### Text about words is left alone
 
@@ -42,23 +60,13 @@ at three levels, each reverting anything already changed:
   at most three words, is being named rather than used. A word is also left alone
   when the other spelling appears nearby, since the text is comparing them.
 
-### What the model is actually for
+### What the general model is for
 
-Measured on the 44 notes of the test artifact (`dev/key.html`): rules alone score
-43/44, rules plus model 44/44. The model is consulted 12 times across those notes
-and the model-heavy cases in `dev/e2e.html`, and overrules the rules 4 times.
-
-That is deliberate. Anything with a reliable signal — capitalisation, agreement,
-topic vocabulary — belongs in a rule, because a rule is inspectable and testable.
-The model is the fallback for what no list anticipated: an ss-word nobody wrote
-down, an unlisted ambiguous word, a case or wording choice. It is worth its 92 MB
-only if you meet such text; on a corpus the rules already cover it earns one word.
-
-To keep it honest it may only overrule a rule when clearly better, by a margin in
-nats that depends on what is at stake (`CONF` in `engine.js`): spelling and word
-choice 2.0, forms 0.5, grammar wording 0. Below that the rule's default stands, so
-an unsure model changes nothing rather than something wrong. The popup lists its
-last few decisions with their margins, and "Baby LLM" off makes it rules-only.
+It ranks candidates by how natural they sound, and may only overrule a rule when
+clearly better, by a margin in nats that depends on what is at stake (`CONF` in
+`engine.js`): word choice 2.0, forms 0.5, grammar wording 0. Below that the rule's
+default stands. The popup lists recent decisions with their margins, and "Baby
+LLM" off turns both models off (rules only).
 
 ### Swiss grammar, not just words
 
@@ -81,11 +89,10 @@ is ordinary German and stays.
 | --- | --- | --- |
 | Vocabulary, compounds, numbers, known ß stems | rules | unambiguous |
 | Articles, adjective endings, case and number after a gender change | rules, model picks when the case is ambiguous ("ein Keks" vs "einen Keks") | |
-| ß for any other word (Masse/Maße, Floss/Floß) | model | needs the context |
+| every ss/ß | eszett model, rules where it is unsure | measured 3× fewer errors than rules on unseen text |
 | Words that are also German with another meaning (Busse, Finken, tönen) | cue words in the surrounding block, else the model | the model only judges how a sentence sounds and cannot know a page is about speeding fines |
 | "zügeln" → "umziehen", incl. moving the particle to the clause end | model | word order |
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
-| ss/ß where capitalisation decides (Ass/aß, Schoß/schoss) | rules | German capitalises nouns |
 | Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea |
 
 ## Settings (toolbar popup)
@@ -106,21 +113,26 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
   (compound exceptions). Genders matter: they drive the article rewriting.
 - Everything else: `'swiss,forms>german,forms'` in `words`, `ambiguous` for
   words the model should judge, `phrases` for multi-word ones.
-- `cues`: words that decide an ambiguous case before the model is asked.
-  `pro` picks the German replacement, `contra` keeps the original — both are
-  regexes matched against the text node first and the block around it second,
-  so a neighbouring note cannot decide this one. This is how "die Bussen für zu
-  schnelles Fahren" becomes Geldstrafen while "die Bussen ab dem Bahnhof" stays
-  buses.
-- `ssCues`: the same, for ss-words whose two spellings are both real words —
-  "die Masse des Fensters" are Maße, "die Masse strömte" is a crowd.
+- `cues`: words that decide an ambiguous *vocabulary* case (Finken, Kasten,
+  tönen) before the general model is asked. `pro` picks the German replacement,
+  `contra` keeps the original — regexes matched against the sentence first, then
+  the text node, then the block around it.
+- `ssCues`: the same for ss-words with two real spellings (Busse/Buße,
+  Masse/Maße). These are the rules' fallback: the eszett model decides, and a cue
+  only outranks it for a spelling it barely saw in training, per `coverage.js`
+  (regenerate with `training/coverage.py` after changing the cue words). That is
+  how "die Bussen für zu schnelles Fahren" becomes Bußen.
 
 ## Tests
 
 Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 
 - `test.html` — rules only, no model, 95 cases.
-- `dev/margins.html` — how confident the model is on every decision it makes.
+- `dev/margins.html` — how confident the general model is on every decision.
+- `dev/heldout.html?llm=1` — the whole engine on held-out Wikipedia sentences
+  (`training/data`), with errors split by whether the model or the rules decided.
+- `dev/offsets.html`, `dev/parity.html` — the browser feeds the eszett model
+  exactly as Python did in training, and gets the same probabilities.
 - `dev/key.html` — the 44 notes of the test artifact against its answer key
   (`dev/corpus.js`), rules plus model; `?mode=neutral` for the other flavour,
   `?llm=0` for rules only.
@@ -163,4 +175,7 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 - The language-page detection is deliberately eager: a page that discusses
   spelling in passing is left untouched entirely, which is the safer of the two
   mistakes. The popup tells you when that is why nothing changed.
-- First use downloads ~92 MB. Until it finishes, choices keep their defaults.
+- The eszett model is bundled (64 MB); the general model downloads ~92 MB on first
+  use. Until they answer, the rules' spellings stand.
+- "die Masse des Fensters" still comes out as Masse: an encyclopedia rarely talks
+  about measuring a window, so that sense is under-represented in training.

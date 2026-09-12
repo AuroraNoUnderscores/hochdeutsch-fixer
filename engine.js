@@ -24,19 +24,25 @@
   const INDEF = /^(?:ein|eine|einen|einem|einer|eines|kein|keine|keinen|keinem|keiner|keines)$/i;
   const NUMERALS = new Set('zwei drei vier fünf sechs sieben acht neun zehn elf zwölf viele mehrere einige beide alle wenige zahlreiche'.split(' '));
 
-  const META_STRONG = new RegExp(D.meta.strong, 'i');
-  const META_WEAK = new RegExp(D.meta.weak, 'gi');
+  // Cues must start a word (and the others end one too): as bare substrings
+  // "Silbe" matched "Silbernes" and "bedeutet" matched "bedeutete".
+  const META_STRONG = new RegExp('(?<!\\p{L})(?:' + D.meta.strong + ')', 'iu');
+  const META_SENTENCE = new RegExp('(?<!\\p{L})(?:' + D.meta.sentence + ')(?!\\p{L})', 'giu');
+  const META_WEAK = new RegExp('(?<!\\p{L})(?:' + D.meta.weak + ')(?!\\p{L})', 'giu');
   const OPEN_QUOTE = /[«„“‚‹"'»]\s*$/;
   const CLOSE_QUOTE = /^\s*[»“”‘›"'«]/;
 
-  const weakCues = text => new Set((text.match(META_WEAK) || []).map(m => m.toLowerCase())).size;
+  const distinct = (text, re) => new Set((text.match(re) || []).map(m => m.toLowerCase()));
 
-  // Is this text talking about words rather than using them? A page or block
-  // needs a strong cue or two weak ones; a single sentence needs only one,
-  // since "in der Mehrzahl zu Massen" is already about the word.
+  // Is this text talking about words rather than using them? A strong cue always
+  // counts. A single sentence needs one unmistakable cue ("in der Mehrzahl zu
+  // Massen"); a page or block needs two cues of any kind.
   function isMeta(text, sentence) {
     if (!text) return false;
-    return META_STRONG.test(text) || weakCues(text) >= (sentence ? 1 : 2);
+    if (META_STRONG.test(text)) return true;
+    const clear = distinct(text, META_SENTENCE);
+    if (sentence) return clear.size >= 1;
+    return clear.size + distinct(text, META_WEAK).size >= 2;
   }
 
   // Per-sentence verdicts for one text, so one explaining sentence in an
@@ -262,26 +268,54 @@
       }
       const lower = w.toLowerCase();
       if (D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { tok.zuegeln = true; continue; }
-      const cased = D.ssCase?.[w.toLowerCase()];
-      if (cased) {
-        // A capitalised word mid-sentence is the noun; lowercase is the verb.
-        const noun = isUpper(w[0]) && !atSentenceStart(text, tok.at);
-        tok.s = noun ? cased.upper : cased.lower;
+      const compounded = compound(t, w);
+      const rule = ssRule(t, w, compounded, tok, text, haystack, sentence, decide);
+      // Every "ss" goes to the fine-tuned model (training/), which decides them
+      // from context; the rules' answer is shown first and stands wherever the
+      // model is off, unsure, or the word was rebuilt from a Swiss compound.
+      if (compounded == null && !allCaps(w) && /ss/.test(w) && !contrasted(haystack, w, w.replace(/ss/g, 'ß'))) {
+        const ruleWord = typeof rule === 'string' ? rule : w;
+        const form = w.toLowerCase();
+        tok.piece = { kind: 'eszett', word: w, at: tok.at, rule: ruleWord, form,
+                      cue: decide(t.ssCues.get(form), sentence),
+                      options: [...new Set([w, ruleWord])], pick: ruleWord === w ? 0 : 1 };
         continue;
       }
-      const s = fixSS(compound(t, w) ?? w);
-      // Both spellings in one text means they are being contrasted ("Masse" vs
-      // "Maße"), so touching either one wrecks the comparison.
-      if (s !== w && !contrasted(haystack, w, s)) { tok.s = s; continue; }
-      if (s !== w) continue;
-      const c = ssChoice(w);
-      if (!c || c.options.some(o => o !== w && contrasted(haystack, w, o))) continue;
-      // "die Masse des Fensters" is about measurements, "die Masse strömte" is a
-      // crowd. The topic decides where it can; otherwise the model does.
-      const verdict = decide(t.ssCues.get(w.toLowerCase()), sentence);
-      if (verdict === 1) tok.s = matchCase(w, c.options[1]);
-      else if (verdict === null) tok.piece = c;
+      if (typeof rule === 'string') tok.s = rule;
+      else if (rule) tok.piece = rule;
     }
+  }
+
+  // Non-overlapping "ss" pairs in a word, as the model was trained to see them.
+  function ssPairs(w) {
+    const out = [];
+    for (let i = 0; i < w.length - 1;) {
+      if (w[i] === 's' && w[i + 1] === 's') { out.push(i); i += 2; } else i++;
+    }
+    return out;
+  }
+
+  // What the rules alone make of an ss-word: a replacement string, a choice for
+  // the general model, or null to leave it.
+  function ssRule(t, w, compounded, tok, text, haystack, sentence, decide) {
+    if (D.ssWords?.[w]) return D.ssWords[w];
+    const cased = D.ssCase?.[w.toLowerCase()];
+    if (cased) {
+      // A capitalised word mid-sentence is the noun; lowercase is the verb.
+      const noun = isUpper(w[0]) && !atSentenceStart(text, tok.at);
+      return noun ? cased.upper : cased.lower;
+    }
+    const s = fixSS(compounded ?? w);
+    // Both spellings in one text means they are being contrasted ("Masse" vs
+    // "Maße"), so touching either one wrecks the comparison.
+    if (s !== w) return contrasted(haystack, w, s) ? null : s;
+    const c = ssChoice(w);
+    if (!c || c.options.some(o => o !== w && contrasted(haystack, w, o))) return null;
+    // "die Masse des Fensters" is about measurements, "die Masse strömte" is a
+    // crowd. The topic decides where it can; otherwise the general model does.
+    const verdict = decide(t.ssCues.get(w.toLowerCase()), sentence);
+    if (verdict === 1) return matchCase(w, c.options[1]);
+    return verdict === null ? c : null;
   }
 
   // ---------- noun phrases, relative pronouns, pronouns ----------
@@ -543,7 +577,7 @@
   const pieceText = p => typeof p === 'string' ? p : p.options[p.pick];
   const renderPieces = pieces => pieces.map(pieceText).join('');
 
-  function render(tokens, fixed) {
+  function render(tokens, fixed, source) {
     const pieces = [];
     for (let x = 0; x < tokens.length; x++) {
       const tk = tokens[x];
@@ -558,6 +592,7 @@
         else pieces.push(piece);
       }
     }
+    pieces.source = source;   // the text the eszett model reads, with every token's offset
     return { text: renderPieces(pieces), changes: fixed + countChoices(pieces), fixed, pieces };
   }
 
@@ -586,7 +621,7 @@
     esHatPass(tokens);
     woPass(tokens);
     zuegelnPass(tokens);
-    return render(tokens, changes);
+    return render(tokens, changes, text);
   }
 
   // Candidate texts the model compares for choice q: its sentence (plus the one
@@ -603,24 +638,86 @@
   }
 
   // Ask `rank` (the baby LLM) to settle every choice. Returns true if anything moved.
+  // How sure the eszett model must be to overrule the rules: p(ß) above 0.5 + this
+  // for ß, below 0.5 - this for ss. In between, the rules' spelling stands.
+  const ESZETT_MARGIN = () => root.HD_ESZETT_MARGIN ?? 0.1;   // overridable for measurement
+  // Fewer training examples than this of a spelling, and the model's view of it
+  // is a prior rather than evidence.
+  const MIN_EVIDENCE = 20;
+
   async function resolve(pieces, rank) {
     const jobs = [];
+    const eszettPieces = [];
     pieces.forEach((p, q) => {
-      if (typeof p === 'object')
-        jobs.push({ q, key: p.key, cf: p.cf, def: p.pick, conf: p.conf ?? CONF.form,
-                    opts: p.options, texts: candidates(pieces, q) });
+      if (typeof p !== 'object') return;
+      if (p.kind === 'eszett') { eszettPieces.push(p); return; }
+      jobs.push({ q, key: p.key, cf: p.cf, def: p.pick, conf: p.conf ?? CONF.form,
+                  opts: p.options, texts: candidates(pieces, q) });
     });
+    // All ss decisions of a text go to the eszett model in one pass.
+    if (eszettPieces.length) {
+      const offsets = eszettPieces.flatMap(p => ssPairs(p.word).map(i => p.at + i));
+      jobs.push({ type: 'eszett', text: pieces.source, offsets });
+    }
     if (!jobs.length) return false;
     const picks = await rank(jobs);
     if (!picks) return false;
     let moved = false;
     jobs.forEach((j, n) => {
       const pick = picks[n];
+      if (j.type === 'eszett') {
+        if (Array.isArray(pick)) moved = applyEszett(eszettPieces, pick) || moved;
+        return;
+      }
       if (pick == null || pick === pieces[j.q].pick) return;
       pieces[j.q].pick = pick;
       moved = true;
     });
     return moved;
+  }
+
+  // Rebuild each ss-word from the model's per-pair probabilities, keeping the
+  // rules' spelling for any pair the model is unsure about.
+  function applyEszett(eszettPieces, probs) {
+    let k = 0, moved = false;
+    for (const p of eszettPieces) {
+      const pairs = ssPairs(p.word);
+      const ruleEszett = ruleSpelling(p.word, p.rule);
+      // A topic cue only outranks the model for a spelling the model barely saw
+      // in training (coverage.js): plural "Bußen" occurred 3 times.
+      const unseen = p.cue != null && (root.HD_COVERAGE?.[p.form]?.[p.cue] ?? Infinity) < MIN_EVIDENCE;
+      let word = '', from = 0;
+      pairs.forEach((i, n) => {
+        const prob = probs[k + n];
+        const eszett = unseen ? p.cue === 1
+          : prob == null ? ruleEszett[n]
+          : prob > 0.5 + ESZETT_MARGIN() ? true
+          : prob < 0.5 - ESZETT_MARGIN() ? false
+          : ruleEszett[n];
+        word += p.word.slice(from, i) + (eszett ? 'ß' : 'ss');
+        from = i + 2;
+      });
+      word += p.word.slice(from);
+      k += pairs.length;
+      if (!p.options.includes(word)) p.options.push(word);
+      const pick = p.options.indexOf(word);
+      if (pick !== p.pick) { p.pick = pick; moved = true; }
+    }
+    return moved;
+  }
+
+  // For each ss pair of the Swiss word, whether the rules' version spells it ß.
+  // Only meaningful when the rules changed nothing but ss/ß.
+  function ruleSpelling(word, rule) {
+    const pairs = ssPairs(word);
+    if (rule === word || rule.replace(/ß/g, 'ss') !== word) return pairs.map(() => false);
+    const out = [];
+    let r = 0;
+    for (let i = 0; i < word.length;) {
+      if (pairs.includes(i)) { out.push(rule[r] === 'ß'); r += rule[r] === 'ß' ? 1 : 2; i += 2; }
+      else { r++; i++; }
+    }
+    return out;
   }
 
   const api = { convert, candidates, renderPieces, resolve, countChoices, isMeta, matchCase };

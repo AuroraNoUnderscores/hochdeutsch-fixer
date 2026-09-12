@@ -10,3 +10,12 @@ desktop.ini
 *.xpi
 *.zip
 web-ext-artifacts/
+
+# training environment and data (scripts in training/ are tracked)
+training/python312/
+training/.venv/
+training/data/
+training/runs/
+training/export/
+training/*.log
+__pycache__/

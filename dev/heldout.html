@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Held-out ss/ß: current engine</title>
+<body style="white-space:pre;font-family:monospace;font-size:12px"></body>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../coverage.js"></script>
+<script src="../engine.js"></script>
+<script src="rank.js"></script>
+<script type="module">
+  // Grades the current engine's ss/ß decisions on held-out Wikipedia sentences
+  // (training/data/test_sample.json), the same text the fine-tuned model is
+  // graded on. Only sentences where the engine changed nothing but ss/ß are
+  // counted, so every decision lines up with the original unambiguously.
+  import { load, score } from '../llm.js';
+  import { rank as sharedRank } from './ranker.js';
+  const E = globalThis.HD_ENGINE;
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  const q = new URLSearchParams(location.search);
+  const useLlm = q.get('llm') === '1';
+  const limit = +(q.get('n') || 3000);
+  if (q.has('margin')) globalThis.HD_ESZETT_MARGIN = +q.get('margin');
+
+  function swissify(t) {
+    let s = '';
+    const o = [];
+    for (let i = 0; i < t.length; i++) {
+      if (t[i] === 'ß') { s += 'ss'; o.push(true, true); } else { s += t[i]; o.push(false); }
+    }
+    return [s, o];
+  }
+  function pairs(s, o) {
+    const out = [];
+    for (let i = 0; i < s.length - 1;) {
+      if (s[i] === 's' && s[i + 1] === 's') { out.push([i, o[i] ? 1 : 0]); i += 2; } else i++;
+    }
+    return out;
+  }
+
+  const german = (await (await fetch('../training/data/test_sample.json')).json()).slice(0, limit);
+  if (useLlm) await load();
+  const rank = async jobs => {
+    const picks = [];
+    picks.push(...await sharedRank(jobs));
+    return picks;
+  };
+
+  let right = 0, wrong = 0, skipped = 0;
+  const errors = [], rulesErrors = [], byPath = {};
+  const t0 = performance.now();
+  for (const [n, g] of german.entries()) {
+    if (n % 25 === 0) { document.title = `${n}/${german.length}`; await new Promise(r => setTimeout(r, 0)); }
+    const [swiss, origin] = swissify(g);
+    const r = E.convert(swiss, { mode: 'neutral' });
+    if (useLlm) await E.resolve(r.pieces, rank);
+    const out = E.renderPieces(r.pieces);
+    const [outSwiss, outOrigin] = swissify(out);
+    if (outSwiss !== swiss) { skipped++; continue; }   // engine changed more than ss/ß
+    const truth = pairs(swiss, origin), guess = pairs(outSwiss, outOrigin);
+    truth.forEach(([at, label], k) => {
+      if (guess[k][1] === label) right++;
+      else {
+        wrong++;
+        // which path decided this word: the eszett model, or rules before it
+        const viaModel = r.pieces.some(pc => pc && pc.kind === 'eszett' && pc.at <= at && at < pc.at + pc.word.length);
+        const why = viaModel ? 'model' : 'rules';
+        byPath[why] = (byPath[why] || 0) + 1;
+        if (why === 'rules' && rulesErrors.length < 25) rulesErrors.push(`${label ? 'ß' : 'ss'} expected: ...${swiss.slice(Math.max(0, at - 30), at + 30)}...`);
+        if (errors.length < 15) errors.push(`[${why}] ${label ? 'ß' : 'ss'} expected: ...${swiss.slice(Math.max(0, at - 30), at + 30)}...`);
+      }
+    });
+  }
+  log(`engine [${useLlm ? 'rules + models, margin ' + (globalThis.HD_ESZETT_MARGIN ?? 0.1) : 'rules only'}], ${german.length} held-out sentences`);
+  log(`${wrong} errors in ${right + wrong} decisions = ${(1000 * wrong / (right + wrong)).toFixed(2)} per 1000`);
+  log(`(${skipped} sentences skipped because the engine also changed vocabulary; ${((performance.now() - t0) / 1000).toFixed(1)}s)\n`);
+  log(`errors by path: ${JSON.stringify(byPath)}
+`);
+  log('decided by rules, not the model:');
+  rulesErrors.forEach(e => log('  ' + e));
+</script>
