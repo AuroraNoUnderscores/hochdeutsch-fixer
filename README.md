@@ -42,6 +42,21 @@ at three levels, each reverting anything already changed:
   at most three words, is being named rather than used. A word is also left alone
   when the other spelling appears nearby, since the text is comparing them.
 
+### Swiss grammar, not just words
+
+Some Helvetisms are constructions rather than vocabulary:
+
+| Swiss | German | how |
+| --- | --- | --- |
+| Es hat noch Tische frei | Es gibt noch freie Tische | rules rewrite, model picks the wording |
+| Der Kollege, wo mir hilft | Der Kollege, der mir hilft | gender from the article, model picks the case |
+| Ich bin gesessen / Er ist gestanden | Ich habe gesessen / Er hat gestanden | rules: position verbs take haben |
+
+"es hat" only becomes "es gibt" where *es* is the subject and the clause holds no
+participle, so "Es hat geregnet", "Sie hat es eilig" and "Er hat es mir gegeben"
+are left alone. Relative "wo" after a place or a time ("die Stadt, wo ich wohne")
+is ordinary German and stays.
+
 ### What each side decides
 
 | Decision | Who | Why |
@@ -52,6 +67,7 @@ at three levels, each reverting anything already changed:
 | Words that are also German with another meaning (Busse, Finken, tönen) | cue words in the surrounding block, else the model | the model only judges how a sentence sounds and cannot know a page is about speeding fines |
 | "zügeln" → "umziehen", incl. moving the particle to the clause end | model | word order |
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
+| ss/ß where capitalisation decides (Ass/aß, Schoß/schoss) | rules | German capitalises nouns |
 | Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea |
 
 ## Settings (toolbar popup)
@@ -85,7 +101,9 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
 
 Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 
-- `test.html` — rules only, no model, 83 cases.
+- `test.html` — rules only, no model, 95 cases.
+- `dev/key.html` — the 44 notes of the test artifact against its answer key
+  (`dev/corpus.js`), rules plus model; `?mode=neutral` for the other flavour.
 - `dev/e2e.html` — rules + model, 15 cases.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
 - `dev/bg.html` — background page: model loading, ranking, caching.
@@ -112,8 +130,14 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
   interface and not the message — a block is processed when its own text reads
   as German (common German words, umlauts). Short fragments on pages with no
   German around them are left alone.
-- Pronoun agreement is only fixed when nothing else could be the antecedent; it
-  stops at the next noun, so a distant reference stays as it was.
+- Pronoun agreement is only fixed when nothing else could be the antecedent: it
+  stops at the next noun, and in a following sentence only a pronoun that opens
+  that sentence counts, so "… auf dem Trottoir. Weil es so heiss war" keeps its
+  weather-"es".
+- Capitalisation settles some ss/ß pairs by itself, with no model call: a noun is
+  capitalised and a past tense is not, so mid-sentence "Ass" stays an ace while
+  "ass" becomes "aß", and "Schoss" becomes "Schoß" while "schoss" stays.
+
 - The model is small. It is good at spelling, articles and word choice in a
   sentence, and knows nothing about the world beyond that.
 - The language-page detection is deliberately eager: a page that discusses

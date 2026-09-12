@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Answer key</title>
+<body style="white-space:pre-wrap;font-family:monospace;font-size:12px"></body>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../engine.js"></script>
+<script src="corpus.js"></script>
+<script type="module">
+  import { load, score } from '../llm.js';
+  const E = globalThis.HD_ENGINE;
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  const mode = new URLSearchParams(location.search).get('mode') || 'hamburg';
+
+  const rank = async jobs => {
+    const picks = [];
+    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    return picks;
+  };
+  await load();
+
+  let fail = 0;
+  for (const [swiss, want, alt] of HD_CORPUS) {
+    const r = E.convert(swiss, { mode });
+    await E.resolve(r.pieces, rank);
+    const got = E.renderPieces(r.pieces);
+    if (got === want || got === alt) continue;
+    fail++;
+    // show only the words that differ, to keep it readable
+    const a = want.split(/(\s+)/), b = got.split(/(\s+)/);
+    const diff = [];
+    for (let i = 0; i < Math.max(a.length, b.length); i++)
+      if (a[i] !== b[i]) diff.push(`want "${(a[i] || '').trim()}" got "${(b[i] || '').trim()}"`);
+    log(`#${String(HD_CORPUS.indexOf(HD_CORPUS.find(x => x[0] === swiss)) + 1).padStart(2, '0')} ${diff.slice(0, 6).join(' | ')}`);
+  }
+  log(`\n${HD_CORPUS.length - fail}/${HD_CORPUS.length} match the answer key [${mode}]`);
+</script>

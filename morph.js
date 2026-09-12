@@ -143,6 +143,16 @@
     return [...out];
   }
 
-  root.HD_MORPH = { parseDet, rewrite, relMap, pronMap, splitAdj, PREP, PRON, REL };
+  // Which gender/case cells a determiner can stand for: "der" is masculine
+  // nominative, but also feminine dative or genitive, and genitive plural.
+  function detCells(det) {
+    const out = [];
+    for (const cell of ['m', 'f', 'n', 'p'])
+      for (let c = 0; c < 4; c++)
+        if (detForm(det, cell, c) === det.form) out.push({ cell, c });
+    return out;
+  }
+
+  root.HD_MORPH = { parseDet, rewrite, relMap, pronMap, splitAdj, detCells, PREP, PRON, REL };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.HD_MORPH;
 })(globalThis);

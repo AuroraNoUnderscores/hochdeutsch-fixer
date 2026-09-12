@@ -153,9 +153,9 @@ globalThis.HD_DICT = {
     'Sujet/n/Sujets = Motiv/n/Motive',
     'Communiqué/n/Communiqués = Pressemitteilung/f/Pressemitteilungen',
     'Beizug/m/- = Hinzuziehung/f/-',
-    'Geldbusse/f/Geldbussen = Geldstrafe/f/Geldstrafen',
-    'Ordnungsbusse/f/Ordnungsbussen = Geldstrafe/f/Geldstrafen',
-    'Parkbusse/f/Parkbussen = Geldstrafe/f/Geldstrafen',
+    'Geldbusse/f/Geldbussen = Geldbuße/f/Geldbußen',
+    'Ordnungsbusse/f/Ordnungsbussen = Bußgeld/n/Bußgelder',
+    'Parkbusse/f/Parkbussen = Bußgeld/n/Bußgelder',
     'Verzeigung/f/Verzeigungen = Anzeige/f/Anzeigen',
     'Bancomat/m/Bancomaten = Geldautomat/m/Geldautomaten | sw gw',
   ],
@@ -177,6 +177,7 @@ globalThis.HD_DICT = {
     'Exgüsi>Entschuldigung',
     // ß in strong past tenses (whole words only)
     'sass,sassen,besass,besassen,vergass,vergassen,frass,frassen,assen>saß,saßen,besaß,besaßen,vergaß,vergaßen,fraß,fraßen,aßen',
+    'Grüss>Grüße', 'mass>maß',
   ],
 
   phrases: [
@@ -202,7 +203,6 @@ globalThis.HD_DICT = {
   ],
 
   ambiguous: [
-    'Busse>Geldstrafe', 'Bussen>Geldstrafen',
     'Finken>Hausschuhe',
     'Kasten>Schrank', 'Kästen>Schränke',
     'tönt>klingt', 'tönen>klingen', 'tönte>klang', 'tönten>klangen',
@@ -212,7 +212,7 @@ globalThis.HD_DICT = {
   // against the text node and its block. A hit here beats the model, which only
   // judges how a sentence sounds and cannot know the topic of the page.
   cues: {
-    'busse,bussen': {
+    'XXbusse,bussen': {
       pro: 'franken|chf|bezahl|zahlen|zahlt|geschwindigkeit|tempo|km/h|zu schnell|polizei|anzeige|strafe|verwarn|delikt|ordnungs|parkier|falschpark|führerausweis|fahrverbot|verkehrsregel|radar|blitz|übertret|widerhandl',
       contra: 'haltestelle|fahrplan|linie|chauffeur|verkehrsbetrieb|postauto|bahnhof|umsteig|reisebus|abfahrt|fahrgast|passagier|öv\\b',
     },
@@ -239,6 +239,24 @@ globalThis.HD_DICT = {
     weak: 'das wort|die wörter|dem wort|der begriff|den begriff|ausdruck|mehrzahl|einzahl|\\bplural\\b|\\bsingular\\b|buchstabe|silbe|aussprache|schreibt man|sagt man|nennt man|heisst es|heißt es|gleich lautend|doppeldeutig|bedeutet|bedeutung|gesprochene sprache|übersetzt|wörtlich|dialekt|mundart|hochdeutsch|standarddeutsch',
   },
 
+  // Swiss grammar, not vocabulary.
+  syntax: {
+    // Perfect with "sein" for verbs of position: süddt./CH "ich bin gesessen",
+    // standard German "ich habe gesessen".
+    sein2haben: {
+      participles: ['gesessen', 'gestanden', 'gelegen'],
+      forms: { bin: 'habe', bist: 'hast', ist: 'hat', sind: 'haben', seid: 'habt', war: 'hatte', warst: 'hattest', waren: 'hatten', wart: 'hattet', wäre: 'hätte', wären: 'hätten', sei: 'habe', seien: 'haben' },
+    },
+    // Existential "es hat" (like French "il y a") -> "es gibt". Not to be
+    // confused with the perfect auxiliary ("es hat geregnet"), which keeps it.
+    esHat: { hat: 'gibt', hatte: 'gab', habe: 'gebe', hätte: 'gäbe' },
+    // "Es hat Tische frei" reads better as "Es gibt freie Tische".
+    fronted: ['frei', 'offen', 'leer', 'belegt', 'übrig'],
+    // Relative "wo" ("der Kollege, wo mir hilft") -> a relative pronoun. After a
+    // place or a time it is ordinary German, so those are left alone.
+    woKeep: 'stadt|ort|dorf|land|haus|zimmer|raum|platz|gegend|region|strasse|straße|stelle|punkt|moment|zeit|tag|woche|monat|jahr|augenblick|situation|fall|land|gebiet|ecke|winkel',
+  },
+
   // "zügeln" = move house (separable "umziehen"), but also "rein in".
   zuegeln: {
     finite: { zügle: 'ziehe', zügelst: 'ziehst', zügelt: 'zieht', zügeln: 'ziehen', zügelte: 'zog', zügeltest: 'zogst', zügelten: 'zogen', zügeltet: 'zogt' },
@@ -262,7 +280,7 @@ globalThis.HD_DICT = {
   ],
 
   // Common words whose ss is correct in Germany too; skipped to save model calls.
-  ssKeep: ('dass muss musst müssen müsst müsste müssten lassen lässt lasst gelassen ' +
+  ssKeep: ('dass muss musst müsse müssen müsst müsste müssten lassen lässt lasst gelassen ' +
     'besser bessere besseren besserer wissen wisst gewiss wissenschaft wissenschaftlich ' +
     'wasser essen isst gegessen vergessen klasse klassen klassisch prozess prozesse ' +
     'interesse interessen interessant adresse adressen presse kasse kassen messe messen ' +
@@ -276,10 +294,23 @@ globalThis.HD_DICT = {
   // Cues for ss-words whose two spellings are both real words. "pro" picks the
   // ß spelling, "contra" keeps the Swiss one; without a hit the model decides.
   ssCues: {
-    'masse,massen': {
-      pro: 'fenster|zimmer|raum|länge|breite|höhe|tiefe|messen|gemessen|zentimeter|millimeter|\bmeter\b|\bcm\b|\bmm\b|abmessung|zuschneiden|schrank|tisch|platte|genaue',
-      contra: 'menschen|menge|leute|publikum|konzert|strömte|kilogramm|gewicht|teig|flüssig|molekül|atom|kritische|erdmasse|muskel',
+    'busse,bussen': {
+      pro: 'franken|chf|bezahl|zahlen|zahlt|verhängt|richter|polizei|strafe|verwarn|delikt|ordnungs|geschwindigkeit|tempo|zu schnell|parkier|falschpark|übertret|widerhandl|gericht',
+      contra: 'fahren|fährt|haltestelle|fahrplan|linie|chauffeur|verkehrsbetrieb|postauto|bahnhof|umsteig|reisebus|abfahrt|fahrgast|passagier|streik|innenstadt|\\böv\\b',
     },
+    'masse,massen': {
+      pro: 'fenster|zimmer|raum|länge|breite|höhe|tiefe|messen|gemessen|zentimeter|millimeter|\\bmeter\\b|\\bcm\\b|\\bmm\\b|abmessung|zuschneiden|schrank|tisch|platte|koffer|gepäck|passt|passen|nahm|nehmen|schneider|möbel',
+      contra: 'menschen|menge|leute|publikum|zuschauer|besucher|fans|konzert|stadion|demonstr|strömte|strömen|drängt|kilogramm|gewicht|teig|flüssig|molekül|atom|kritische|erdmasse|muskel|stand',
+    },
+  },
+
+  // Words where capitalisation alone settles the spelling: the noun is
+  // capitalised ("ein Ass im Ärmel", "auf dem Schoß"), the past tense is not
+  // ("ich aß", "er schoss daneben").
+  ssCase: {
+    ass: { upper: 'Ass', lower: 'aß' },
+    schoss: { upper: 'Schoß', lower: 'schoss' },
+    floss: { upper: 'Floß', lower: 'floss' },
   },
 
   // ss-words where both spellings are real words, so the context decides.

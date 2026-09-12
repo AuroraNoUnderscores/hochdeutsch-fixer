@@ -213,17 +213,20 @@
     return { options: [w, ...variants], pick: 0, key: 'ss:' + lower, cf: !ssContext.has(lower) };
   }
 
+  const atSentenceStart = (text, at) => !text.slice(0, at).replace(/[\s"'«»„“‚‹(\[]+$/, '').match(/[^.!?]$/);
+
   // A word in quotes is being named, not used: «Velo», „Mass“.
   const quoted = (tokens, i) =>
     OPEN_QUOTE.test(tokens[i - 1]?.s || '') && CLOSE_QUOTE.test(tokens[i + 1]?.s || '');
 
   function wordPass(t, text, tokens, context) {
     const haystack = (context ? context + ' ' : '') + text;
-    // Cues in this very text beat cues from the block around it: a page of short
-    // notes shares one block, and "Fenster" in one note must not decide another.
-    const decide = cue => {
+    // Cues are judged on the sentence first, then the whole text, then the block
+    // around it. A long note holds several sentences and "Koffer" in one of them
+    // must not decide the spelling in another.
+    const decide = (cue, sentence) => {
       if (!cue) return null;
-      for (const hay of [text, haystack]) {
+      for (const hay of [sentence, text, haystack]) {
         if (cue.pro?.test(hay)) return 1;
         if (cue.contra?.test(hay)) return 0;
       }
@@ -236,6 +239,7 @@
       if (!tok.w || quoted(tokens, i)) continue;
       while (span < spans.length - 1 && tok.at >= spans[span].end) span++;
       if (spans[span]?.meta) continue; // this sentence is explaining a word
+      const sentence = text.slice(span ? spans[span - 1].end : 0, spans[span]?.end ?? text.length);
       const w = tok.w;
       const noun = findNoun(t, w);
       if (noun) { tok.noun = noun; continue; }
@@ -246,13 +250,20 @@
       const v = verb(t, w, text.slice(start, tok.at), text.slice(end, end + 40));
       if (v !== undefined) { if (typeof v === 'string') tok.s = v; else tok.piece = v; continue; }
       if (t.amb.has(w)) {
-        const verdict = decide(t.cues.get(w.toLowerCase()));
+        const verdict = decide(t.cues.get(w.toLowerCase()), sentence);
         if (verdict === 1) tok.s = t.amb.get(w);          // topic settles it
         else if (verdict === null) tok.piece = { options: [w, t.amb.get(w)], pick: 0 }; // ask the model
         continue;
       }
       const lower = w.toLowerCase();
       if (D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { tok.zuegeln = true; continue; }
+      const cased = D.ssCase?.[w.toLowerCase()];
+      if (cased) {
+        // A capitalised word mid-sentence is the noun; lowercase is the verb.
+        const noun = isUpper(w[0]) && !atSentenceStart(text, tok.at);
+        tok.s = noun ? cased.upper : cased.lower;
+        continue;
+      }
       const s = fixSS(compound(t, w) ?? w);
       // Both spellings in one text means they are being contrasted ("Masse" vs
       // "Maße"), so touching either one wrecks the comparison.
@@ -262,7 +273,7 @@
       if (!c || c.options.some(o => o !== w && contrasted(haystack, w, o))) continue;
       // "die Masse des Fensters" is about measurements, "die Masse strömte" is a
       // crowd. The topic decides where it can; otherwise the model does.
-      const verdict = decide(t.ssCues.get(w.toLowerCase()));
+      const verdict = decide(t.ssCues.get(w.toLowerCase()), sentence);
       if (verdict === 1) tok.s = matchCase(w, c.options[1]);
       else if (verdict === null) tok.piece = c;
     }
@@ -349,23 +360,26 @@
       }
     }
     if (oldCell === 'p' || newCell === 'p') return;
-    let ends = 0, blocked = false, sentenceStart = false;
+    let ends = 0, blocked = false, wordsInSentence = 0;
     for (let x = i + 1; x < tokens.length; x++) {
       const tk = tokens[x];
       if (!tk.w) {
         const n = (tk.s.match(/[.!?](?:\s|$)/g) || []).length; // not "1.250.000"
-        if (n) { ends += n; if (ends >= 2) break; blocked = false; sentenceStart = true; }
+        if (n) { ends += n; if (ends >= 2) break; blocked = false; wordsInSentence = 0; }
         continue;
       }
-      if (!free(tk)) { blocked = true; sentenceStart = false; continue; } // another noun of ours
+      const first = wordsInSentence === 0;
+      wordsInSentence++;
+      if (!free(tk)) { blocked = true; continue; } // another noun of ours
       const forms = [...new Set(M.pronMap(tk.s, oldCell, newCell).map(f => matchCase(tk.s, f)))].filter(f => f !== tk.s);
       if (!forms.length) {
-        if (isUpper(tk.w[0]) && !sentenceStart) blocked = true; // some other noun it may refer to
-        sentenceStart = false;
+        if (isUpper(tk.w[0]) && !first) blocked = true; // some other noun it may refer to
         continue;
       }
-      sentenceStart = false;
-      if (blocked || (tk.s.toLowerCase() === 'es' && impersonal(tokens, x))) continue;
+      // In the next sentence only a pronoun that opens it continues the topic.
+      // "… auf dem Trottoir. Weil es so heiss war" is about the weather, not the pavement.
+      if (blocked || (ends && !first)) continue;
+      if (tk.s.toLowerCase() === 'es' && impersonal(tokens, x)) continue;
       if (forms.length === 1) tk.s = forms[0];
       else tk.piece = { options: forms, pick: 0, ctx: 2 }; // which case: model decides
     }
@@ -435,6 +449,90 @@
     }
   }
 
+
+  // ---------- Swiss grammar ----------
+
+  const PARTICIPLE = /(?:^|[^\p{L}])ge\p{Ll}+(?:t|en)(?![\p{L}])/u;
+
+  // Clause around token i, as text, for looking at what a construction contains.
+  function clauseText(tokens, i, back) {
+    let a = i, b = i;
+    while (a > 0 && (tokens[a - 1].w || !/[.,;:!?]/.test(tokens[a - 1].s))) a--;
+    while (b < tokens.length - 1 && (tokens[b + 1].w || !/[.,;:!?]/.test(tokens[b + 1].s))) b++;
+    if (!back) a = i;
+    return { a, b, text: tokens.slice(a, b + 1).map(tk => tk.piece !== undefined ? pieceText(tk.piece) : tk.s).join('') };
+  }
+
+  // "Ich bin gesessen" -> "Ich habe gesessen": position verbs take haben.
+  function sein2habenPass(tokens) {
+    const { forms, participles } = D.syntax.sein2haben;
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (!free(tok)) continue;
+      const swap = forms[tok.s.toLowerCase()];
+      if (!swap) continue;
+      const { text } = clauseText(tokens, i);
+      const words = text.toLowerCase().split(/[^\p{L}]+/u);
+      if (!participles.some(pp => words.includes(pp))) continue;
+      tok.s = matchCase(tok.s, swap);
+    }
+  }
+
+  // Existential "es hat ..." -> "es gibt ...", and "Tische frei" -> "freie Tische".
+  function esHatPass(tokens) {
+    const { esHat, fronted } = D.syntax;
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (!free(tok)) continue;
+      const swap = esHat[tok.s.toLowerCase()];
+      if (!swap) continue;
+      const isEs = w => w && w.w && w.s.toLowerCase() === 'es';
+      const { a } = clauseText(tokens, i, true);
+      let firstWord = a;
+      while (firstWord < i && !tokens[firstWord].w) firstWord++;
+      // "es hat …", or "hat es …?" where the verb opens the clause. In
+      // "Sie hat es eilig" the subject is "sie", so it is an ordinary "haben".
+      if (!isEs(tokens[i - 2]) && !(firstWord === i && isEs(tokens[i + 2]))) continue;
+      const { b, text: rest } = clauseText(tokens, i);
+      if (PARTICIPLE.test(rest)) continue;               // "es hat geregnet" is a perfect
+      const swapped = spanText(tokens, i, b, { [i]: matchCase(tok.s, swap) });
+      const options = [spanText(tokens, i, b), swapped];
+      // "gibt ... Tische frei" also exists as "gibt ... freie Tische"
+      const m = new RegExp('^(.*?)([A-ZÄÖÜ][A-Za-zäöüßÄÖÜ]+)\\s+(' + fronted.join('|') + ')\\b(.*)$').exec(swapped);
+      if (m)
+        for (const end of ['e', 'en', 'er', 'es', 'em'])
+          options.push(`${m[1]}${m[3]}${end} ${m[2]}${m[4]}`);
+      setSpan(tokens, i, b, { options: [...new Set(options)], pick: options.length > 2 ? 2 : 1 });
+    }
+  }
+
+  // "Der Kollege, wo mir hilft" -> "der mir hilft". After a place or a time,
+  // "wo" is ordinary German and stays.
+  function woPass(tokens) {
+    const keep = new RegExp(D.syntax.woKeep, 'i');
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (!free(tok) || tok.s.toLowerCase() !== 'wo') continue;
+      if (!tokens[i - 1] || tokens[i - 1].w || !/,\s*$/.test(tokens[i - 1].s)) continue;
+      let n = i - 2;                                     // the noun before the comma
+      while (n >= 0 && !tokens[n].w) n--;
+      const noun = tokens[n];
+      if (!noun || !isUpper(noun.s[0]) || keep.test(noun.s)) continue;
+      let d = n - 2;                                     // its determiner, maybe after adjectives
+      let det = null;
+      while (d >= 0 && tokens[d].w) {
+        det = M.parseDet(tokens[d].s);
+        if (det || !M.splitAdj(tokens[d].s)) break;
+        d -= 2;
+      }
+      if (!det) continue;
+      const cells = M.detCells(det);
+      const forms = [...new Set(cells.flatMap(({ cell }) => [0, 1, 2].map(c => M.REL[cell][c])))];
+      if (!forms.length) continue;
+      tok.piece = { options: [...forms, tok.s], pick: 0 };
+    }
+  }
+
   // ---------- rendering and model hand-off ----------
 
   const pieceText = p => typeof p === 'string' ? p : p.options[p.pick];
@@ -479,6 +577,9 @@
       tokens.push(m[1] ? { w: m[1], s: m[1], at: m.index } : { s: m[0], at: m.index });
     wordPass(t, text, tokens, opts.context);
     npPass(tokens);
+    sein2habenPass(tokens);
+    esHatPass(tokens);
+    woPass(tokens);
     zuegelnPass(tokens);
     return render(tokens, changes);
   }
