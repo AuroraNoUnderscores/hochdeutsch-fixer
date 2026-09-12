@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Model margins</title>
+<body style="white-space:pre;font-family:monospace;font-size:12px"></body>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../engine.js"></script>
+<script src="corpus.js"></script>
+<script src="cases-e2e.js"></script>
+<script type="module">
+  import { load, score } from '../llm.js';
+  const E = globalThis.HD_ENGINE;
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+  await load();
+
+  const rows = [];
+  const all = [...HD_CORPUS, ...HD_CASES_E2E.map(([a, b]) => [a, b])];
+  for (const [swiss, want, alt] of all) {
+    const r = E.convert(swiss, { mode: 'hamburg' });
+    await E.resolve(r.pieces, async jobs => {
+      const picks = [];
+      for (const j of jobs) {
+        const s = await score(j.texts);
+        const best = s.indexOf(Math.max(...s));
+        const def = r.pieces[j.q].pick;
+        rows.push({ opts: r.pieces[j.q].options, def, best, margin: s[best] - s[def] });
+        picks.push(best);
+      }
+      return picks;
+    });
+    const got = E.renderPieces(r.pieces);
+    rows.filter(x => x.sentence === undefined).forEach(x => { x.sentence = got; x.ok = got === want || got === alt; });
+  }
+
+  const changed = rows.filter(r => r.best !== r.def);
+  log(`${rows.length} model decisions, ${changed.length} overrode the rule default\n`);
+  log('margin  default -> chosen                         case');
+  for (const r of changed.sort((a, b) => a.margin - b.margin))
+    log(`${r.margin.toFixed(2).padStart(6)}  ${(r.opts[r.def] + ' -> ' + r.opts[r.best]).slice(0, 40).padEnd(42)} ${r.ok ? 'ok' : 'WRONG'}`);
+  const worst = Math.min(...changed.filter(r => r.ok).map(r => r.margin));
+  log(`\nsmallest margin among correct overrides: ${worst.toFixed(2)}`);
+</script>

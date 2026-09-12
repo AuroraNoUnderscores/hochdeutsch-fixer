@@ -39,13 +39,14 @@
 <script>
   setTimeout(() => { document.getElementById('h').textContent = 'Nachgeladen: Die Velofahrer grüssen.'; }, 50);
 </script>
+<script src="rank.js"></script>
 <script type="module">
   import { load, score } from '../llm.js';
   const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
   await load();
   window.__setRank(async jobs => {
     const picks = [];
-    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    for (const j of jobs) { const s = await score(j.texts); picks.push(HD_PICK(s, j)); }
     return picks;
   });
 

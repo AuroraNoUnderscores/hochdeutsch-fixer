@@ -5,6 +5,12 @@ import { load, score, MODEL } from './llm.js';
 
 const state = { status: 'idle', progress: 0, decided: 0, error: null, model: MODEL };
 const cache = new Map();
+const log = [];   // what the model recently did, for the popup
+
+function note(entry) {
+  log.unshift(entry);
+  log.length = Math.min(log.length, 20);
+}
 let chain = Promise.resolve();
 let started = null;
 
@@ -38,7 +44,17 @@ async function rank(jobs) {
       const key = j.cf && j.key ? j.key : JSON.stringify(j.texts);
       if (cache.has(key)) { picks.push(cache.get(key)); continue; }
       const scores = await score(j.texts);
-      const best = scores.indexOf(Math.max(...scores));
+      let best = scores.indexOf(Math.max(...scores));
+      // Only overrule the rules when clearly better; a near-tie keeps their
+      // default, which is what stops confident-sounding nonsense.
+      const def = j.def ?? 0;
+      const margin = scores[best] - scores[def];
+      const shy = best !== def && margin < (j.conf ?? 0);
+      if (shy) best = def;
+      if (j.opts && (best !== def || shy)) note({
+        from: j.opts[def], to: j.opts[shy ? scores.indexOf(Math.max(...scores)) : best],
+        margin: +margin.toFixed(1), kept: shy,
+      });
       cache.set(key, best);
       if (cache.size > 20000) cache.delete(cache.keys().next().value);
       state.decided++;
@@ -83,7 +99,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === 'count') { noteCount(sender, msg); return; }
   if (msg?.type === 'tab-count') return Promise.resolve(tabTotal(msg.tabId));
   if (msg?.type === 'rank') return rank(msg.jobs);
-  if (msg?.type === 'llm-status') return Promise.resolve({ ...state });
+  if (msg?.type === 'llm-status') return Promise.resolve({ ...state, log: log.slice(0, 5) });
   if (msg?.type === 'llm-load') { ensure().catch(() => {}); return Promise.resolve(true); }
   if (msg?.type === 'top-host') {
     try { return Promise.resolve(new URL(sender.tab?.url || '').hostname || null); } catch { return Promise.resolve(null); }

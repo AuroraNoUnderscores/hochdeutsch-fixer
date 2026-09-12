@@ -39,12 +39,13 @@
 <script src="../morph.js"></script>
 <script src="../engine.js"></script>
 <script src="../content.js"></script>
+<script src="rank.js"></script>
 <script type="module">
   import { load, score } from '../llm.js';
   await load();
   window.__setRank(async jobs => {
     const picks = [];
-    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    for (const j of jobs) { const s = await score(j.texts); picks.push(HD_PICK(s, j)); }
     return picks;
   });
   await new Promise(r => setTimeout(r, 5000));

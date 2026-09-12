@@ -13,6 +13,10 @@
   .foot { padding: 9px 14px 12px; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.5; }
   #bar { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 5px; }
   #bar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  #log { margin-top: 6px; font-size: 11px; line-height: 1.6; }
+  #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log b { font-weight: 600; color: var(--fg); }
+  #log .kept { opacity: .65; }
 </style>
 <header><b>Moin!</b> Hochdeutsch-Fixer</header>
 <label>Enabled <input type="checkbox" id="enabled"></label>
@@ -28,5 +32,6 @@
   <div id="count"></div>
   <div id="llm-status"></div>
   <div id="bar" hidden><div></div></div>
+  <div id="log"></div>
 </div>
 <script src="popup.js"></script>

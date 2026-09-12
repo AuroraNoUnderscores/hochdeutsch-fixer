@@ -8,6 +8,11 @@
   const D = root.HD_DICT, M = root.HD_MORPH;
 
   const ENDINGS = ['', 'e', 'en', 'er', 'es', 'em'];
+  // How much better a candidate must score (in nats) before the model may
+  // overrule the rules' default. A wrong spelling or word choice is the most
+  // visible kind of mistake, so those demand real confidence; for grammar the
+  // rules already decided what to do and the model only picks the wording.
+  const CONF = { spelling: 2, word: 2, form: 0.5, grammar: 0 };
   const AUX = /(?:^|[^\p{L}])(?:hat|habe|hast|haben|habt|hatte|hattest|hatten|hattet|hätte|hätten|ist|bin|bist|sind|seid|war|warst|waren|wart|wäre|wären|wird|wirst|werden|werdet|wurde|wurden|worden|gewesen)(?![\p{L}])/iu;
   const VERB_END = /^(?:en|e|st|t|et|te|ten|ter|tes|tem|test|tet|end|ende|enden|ender|endes|endem)$/;
   const NEXT_IS_NOUN = /^\s+\p{Lu}/u;
@@ -210,7 +215,7 @@
     const swap = at => w.slice(0, at) + 'ß' + w.slice(at + 2);
     const variants = idx.map(swap);
     if (idx.length > 1) variants.push(idx.reduceRight((s, at) => s.slice(0, at) + 'ß' + s.slice(at + 2), w));
-    return { options: [w, ...variants], pick: 0, key: 'ss:' + lower, cf: !ssContext.has(lower) };
+    return { options: [w, ...variants], pick: 0, conf: CONF.spelling, key: 'ss:' + lower, cf: !ssContext.has(lower) };
   }
 
   const atSentenceStart = (text, at) => !text.slice(0, at).replace(/[\s"'«»„“‚‹(\[]+$/, '').match(/[^.!?]$/);
@@ -252,7 +257,7 @@
       if (t.amb.has(w)) {
         const verdict = decide(t.cues.get(w.toLowerCase()), sentence);
         if (verdict === 1) tok.s = t.amb.get(w);          // topic settles it
-        else if (verdict === null) tok.piece = { options: [w, t.amb.get(w)], pick: 0 }; // ask the model
+        else if (verdict === null) tok.piece = { options: [w, t.amb.get(w)], pick: 0, conf: CONF.word }; // ask the model
         continue;
       }
       const lower = w.toLowerCase();
@@ -334,7 +339,7 @@
         return s;
       };
       const options = [...new Set(outs.map(renderOut))];
-      setSpan(tokens, start, i, options.length === 1 ? options[0] : { options, pick: 0 });
+      setSpan(tokens, start, i, options.length === 1 ? options[0] : { options, pick: 0, conf: CONF.form });
       followUps(tokens, i, outs[0].oldCell, outs[0].cell);
     }
   }
@@ -355,7 +360,7 @@
         const nounNext = isSpace(tokens[r + 1]) && tokens[r + 2]?.w && isUpper(tokens[r + 2].w[0]);
         if (forms.length && !nounNext) {              // a noun after it means "das" was an article
           if (forms.length === 1) tk.s = forms[0];
-          else tk.piece = { options: forms, pick: 0 }; // which case: model decides
+          else tk.piece = { options: forms, pick: 0, conf: CONF.form }; // which case: model decides
         }
       }
     }
@@ -381,7 +386,7 @@
       if (blocked || (ends && !first)) continue;
       if (tk.s.toLowerCase() === 'es' && impersonal(tokens, x)) continue;
       if (forms.length === 1) tk.s = forms[0];
-      else tk.piece = { options: forms, pick: 0, ctx: 2 }; // which case: model decides
+      else tk.piece = { options: forms, pick: 0, ctx: 2, conf: CONF.form }; // which case: model decides
     }
   }
 
@@ -427,8 +432,8 @@
         const aux = a >= 0 && tokens[a].w && Z.aux[tokens[a].s.toLowerCase()];
         if (aux && !tokens.slice(a, i).some(tk => tk.spanEnd >= i)) {
           const swapped = spanText(tokens, a, i, { [a]: matchCase(tokens[a].s, aux), [i]: repl });
-          setSpan(tokens, a, i, { options: [spanText(tokens, a, i), swapped], pick: 0 });
-        } else tok.piece = { options: [tok.w, repl], pick: 0 };
+          setSpan(tokens, a, i, { options: [spanText(tokens, a, i), swapped], pick: 0, conf: CONF.grammar });
+        } else tok.piece = { options: [tok.w, repl], pick: 0, conf: CONF.grammar };
         continue;
       }
       const form = Z.finite[lower];
@@ -439,12 +444,12 @@
       while (tokens[last]?.skip) last++; // don't cut through a noun phrase
       const prev = tokens[i - 2];
       if (last === i && lower === 'zügeln' && isSpace(tokens[i - 1]) && prev?.w?.toLowerCase() === 'zu' && prev.piece === undefined) {
-        setSpan(tokens, i - 2, i, { options: [spanText(tokens, i - 2, i), matchCase(prev.w, 'umzuziehen')], pick: 0 });
+        setSpan(tokens, i - 2, i, { options: [spanText(tokens, i - 2, i), matchCase(prev.w, 'umzuziehen')], pick: 0, conf: CONF.grammar });
       } else if (last === i) {
-        tok.piece = { options: [...new Set([tok.w, matchCase(tok.w, 'um' + form), matchCase(tok.w, form) + ' um'])], pick: 0 };
+        tok.piece = { options: [...new Set([tok.w, matchCase(tok.w, 'um' + form), matchCase(tok.w, form) + ' um'])], pick: 0, conf: CONF.grammar };
       } else {
         const moved = spanText(tokens, i, last, { [i]: matchCase(tok.w, form) }) + ' um';
-        setSpan(tokens, i, last, { options: [spanText(tokens, i, last), moved], pick: 0 });
+        setSpan(tokens, i, last, { options: [spanText(tokens, i, last), moved], pick: 0, conf: CONF.grammar });
       }
     }
   }
@@ -502,7 +507,7 @@
       if (m)
         for (const end of ['e', 'en', 'er', 'es', 'em'])
           options.push(`${m[1]}${m[3]}${end} ${m[2]}${m[4]}`);
-      setSpan(tokens, i, b, { options: [...new Set(options)], pick: options.length > 2 ? 2 : 1 });
+      setSpan(tokens, i, b, { options: [...new Set(options)], pick: options.length > 2 ? 2 : 1, conf: CONF.grammar });
     }
   }
 
@@ -529,7 +534,7 @@
       const cells = M.detCells(det);
       const forms = [...new Set(cells.flatMap(({ cell }) => [0, 1, 2].map(c => M.REL[cell][c])))];
       if (!forms.length) continue;
-      tok.piece = { options: [...forms, tok.s], pick: 0 };
+      tok.piece = { options: [...forms, tok.s], pick: 0, conf: CONF.form };
     }
   }
 
@@ -601,7 +606,9 @@
   async function resolve(pieces, rank) {
     const jobs = [];
     pieces.forEach((p, q) => {
-      if (typeof p === 'object') jobs.push({ q, key: p.key, cf: p.cf, texts: candidates(pieces, q) });
+      if (typeof p === 'object')
+        jobs.push({ q, key: p.key, cf: p.cf, def: p.pick, conf: p.conf ?? CONF.form,
+                    opts: p.options, texts: candidates(pieces, q) });
     });
     if (!jobs.length) return false;
     const picks = await rank(jobs);

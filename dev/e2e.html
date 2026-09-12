@@ -5,6 +5,7 @@
 <script src="../dictionary.js"></script>
 <script src="../morph.js"></script>
 <script src="../engine.js"></script>
+<script src="rank.js"></script>
 <script type="module">
   import { load, score } from '../llm.js';
   const E = globalThis.HD_ENGINE;
@@ -14,7 +15,7 @@
     const picks = [];
     for (const j of jobs) {
       const s = await score(j.texts);
-      picks.push(s.indexOf(Math.max(...s)));
+      picks.push(HD_PICK(s, j));
     }
     return picks;
   };

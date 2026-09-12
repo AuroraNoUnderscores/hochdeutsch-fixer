@@ -18,6 +18,7 @@
 </body>'></iframe>
 <pre id="result"></pre>
 
+<script src="rank.js"></script>
 <script type="module">
   import { load, score } from '../llm.js';
   const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
@@ -29,7 +30,7 @@
   await load();
   const rank = async jobs => {
     const picks = [];
-    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    for (const j of jobs) { const s = await score(j.texts); picks.push(HD_PICK(s, j)); }
     return picks;
   };
   // Stub the extension API inside the frame, then inject exactly what the

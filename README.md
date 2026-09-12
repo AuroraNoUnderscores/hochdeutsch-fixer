@@ -42,6 +42,24 @@ at three levels, each reverting anything already changed:
   at most three words, is being named rather than used. A word is also left alone
   when the other spelling appears nearby, since the text is comparing them.
 
+### What the model is actually for
+
+Measured on the 44 notes of the test artifact (`dev/key.html`): rules alone score
+43/44, rules plus model 44/44. The model is consulted 12 times across those notes
+and the model-heavy cases in `dev/e2e.html`, and overrules the rules 4 times.
+
+That is deliberate. Anything with a reliable signal — capitalisation, agreement,
+topic vocabulary — belongs in a rule, because a rule is inspectable and testable.
+The model is the fallback for what no list anticipated: an ss-word nobody wrote
+down, an unlisted ambiguous word, a case or wording choice. It is worth its 92 MB
+only if you meet such text; on a corpus the rules already cover it earns one word.
+
+To keep it honest it may only overrule a rule when clearly better, by a margin in
+nats that depends on what is at stake (`CONF` in `engine.js`): spelling and word
+choice 2.0, forms 0.5, grammar wording 0. Below that the rule's default stands, so
+an unsure model changes nothing rather than something wrong. The popup lists its
+last few decisions with their margins, and "Baby LLM" off makes it rules-only.
+
 ### Swiss grammar, not just words
 
 Some Helvetisms are constructions rather than vocabulary:
@@ -102,8 +120,10 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
 Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 
 - `test.html` — rules only, no model, 95 cases.
+- `dev/margins.html` — how confident the model is on every decision it makes.
 - `dev/key.html` — the 44 notes of the test artifact against its answer key
-  (`dev/corpus.js`), rules plus model; `?mode=neutral` for the other flavour.
+  (`dev/corpus.js`), rules plus model; `?mode=neutral` for the other flavour,
+  `?llm=0` for rules only.
 - `dev/e2e.html` — rules + model, 15 cases.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
 - `dev/bg.html` — background page: model loading, ranking, caching.

@@ -40,6 +40,15 @@ async function refresh() {
     bar.firstElementChild.style.width = `${llm.progress}%`;
   } else if (llm.status === 'error') $('llm-status').textContent = `Model error: ${llm.error}`;
   else $('llm-status').textContent = `Model ready — ${llm.decided} decision${llm.decided === 1 ? '' : 's'} made.`;
+
+  // What the model recently did, so its calls can be checked rather than guessed at.
+  $('log').replaceChildren(...(llm?.log || []).map(d => {
+    const row = document.createElement('div');
+    if (d.kept) row.className = 'kept';
+    row.append(d.kept ? 'kept ' : '', Object.assign(document.createElement('b'), { textContent: d.kept ? d.from : d.to }));
+    row.append(d.kept ? ` over ${d.to} (${d.margin})` : ` for ${d.from} (${d.margin})`);
+    return row;
+  }));
 }
 
 const later = () => setTimeout(refresh, 150);
