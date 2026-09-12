@@ -5,8 +5,9 @@ async function refresh() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let page = null;
   try { page = await browser.tabs.sendMessage(tab.id, 'hd-status'); } catch {}
-  let llm = null;
+  let llm = null, tab_ = null;
   try { llm = await browser.runtime.sendMessage({ type: 'llm-status' }); } catch {}
+  try { tab_ = await browser.runtime.sendMessage({ type: 'tab-count', tabId: tab.id }); } catch {}
   const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm']);
 
   $('enabled').checked = s.enabled !== false;
@@ -17,12 +18,16 @@ async function refresh() {
     host = page.host;
     $('site-label').textContent = host;
     $('site').checked = !(s.disabledSites || []).includes(host);
+    const n = tab_ ? tab_.count : page.count;
+    const inFrames = tab_ && tab_.frames > 1 ? ` in ${tab_.frames} frames` : '';
     $('count').textContent = !page.active ? 'Off on this page'
       : page.meta ? 'Page is about language — left as is'
-      : `${page.count} replacement${page.count === 1 ? '' : 's'} on this page`;
+      : `${n} replacement${n === 1 ? '' : 's'} on this page${inFrames}`;
   } else {
     $('site-row').hidden = true;
-    $('count').textContent = 'Not available on this page.';
+    $('count').textContent = tab_ && tab_.count
+      ? `${tab_.count} replacement${tab_.count === 1 ? '' : 's'} in this tab`
+      : 'Not available on this page.';
   }
 
   const bar = $('bar');

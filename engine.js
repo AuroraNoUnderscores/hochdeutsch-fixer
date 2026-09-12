@@ -123,9 +123,11 @@
     t.phraseRe = phrases.length && new RegExp(`(?<!\\p{L})(?:${phrases.map(([k]) => escapeRe(k)).join('|')})(?!\\p{L})`, 'gu');
     for (const line of D.ambiguous) { const [k, v] = line.split('>'); t.amb.set(k, v); }
     t.cues = new Map();
-    for (const [keys, cue] of Object.entries(D.cues || {}))
-      for (const k of keys.split(','))
-        t.cues.set(k, { pro: cue.pro && new RegExp(cue.pro, 'i'), contra: cue.contra && new RegExp(cue.contra, 'i') });
+    t.ssCues = new Map();
+    for (const [name, src] of [['cues', D.cues], ['ssCues', D.ssCues]])
+      for (const [keys, cue] of Object.entries(src || {}))
+        for (const k of keys.split(','))
+          t[name].set(k, { pro: cue.pro && new RegExp(cue.pro, 'i'), contra: cue.contra && new RegExp(cue.contra, 'i') });
     return (tableCache[mode] = t);
   }
 
@@ -217,6 +219,16 @@
 
   function wordPass(t, text, tokens, context) {
     const haystack = (context ? context + ' ' : '') + text;
+    // Cues in this very text beat cues from the block around it: a page of short
+    // notes shares one block, and "Fenster" in one note must not decide another.
+    const decide = cue => {
+      if (!cue) return null;
+      for (const hay of [text, haystack]) {
+        if (cue.pro?.test(hay)) return 1;
+        if (cue.contra?.test(hay)) return 0;
+      }
+      return null;
+    };
     const spans = metaSentences(text);
     let span = 0;
     for (let i = 0; i < tokens.length; i++) {
@@ -234,10 +246,9 @@
       const v = verb(t, w, text.slice(start, tok.at), text.slice(end, end + 40));
       if (v !== undefined) { if (typeof v === 'string') tok.s = v; else tok.piece = v; continue; }
       if (t.amb.has(w)) {
-        const cue = t.cues.get(w.toLowerCase());
-        const pro = cue?.pro?.test(haystack), contra = !pro && cue?.contra?.test(haystack);
-        if (pro) tok.s = t.amb.get(w);                    // topic settles it
-        else if (!contra) tok.piece = { options: [w, t.amb.get(w)], pick: 0 }; // ask the model
+        const verdict = decide(t.cues.get(w.toLowerCase()));
+        if (verdict === 1) tok.s = t.amb.get(w);          // topic settles it
+        else if (verdict === null) tok.piece = { options: [w, t.amb.get(w)], pick: 0 }; // ask the model
         continue;
       }
       const lower = w.toLowerCase();
@@ -248,7 +259,12 @@
       if (s !== w && !contrasted(haystack, w, s)) { tok.s = s; continue; }
       if (s !== w) continue;
       const c = ssChoice(w);
-      if (c && !c.options.some(o => o !== w && contrasted(haystack, w, o))) tok.piece = c;
+      if (!c || c.options.some(o => o !== w && contrasted(haystack, w, o))) continue;
+      // "die Masse des Fensters" is about measurements, "die Masse strömte" is a
+      // crowd. The topic decides where it can; otherwise the model does.
+      const verdict = decide(t.ssCues.get(w.toLowerCase()));
+      if (verdict === 1) tok.s = matchCase(w, c.options[1]);
+      else if (verdict === null) tok.piece = c;
     }
   }
 

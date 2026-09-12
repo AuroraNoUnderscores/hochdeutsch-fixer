@@ -9,11 +9,26 @@
   let mode = 'hamburg', llm = true, count = 0, active = false, observer = null, pageMeta = false;
   const queue = [];
   let pumping = false;
+  let reported = -1, reportTimer = null;
+
+  // Tell the background what this frame has done, so the popup can add up all
+  // frames. Work often happens in an iframe the popup never talks to.
+  function report() {
+    clearTimeout(reportTimer);
+    reportTimer = setTimeout(() => {
+      if (count === reported) return;
+      reported = count;
+      browser.runtime.sendMessage({
+        type: 'count', count, meta: pageMeta,
+        top: window.top === window, href: location.href,
+      }).catch(() => {});
+    }, 300);
+  }
 
   const SKIP = 'script,style,noscript,textarea,input,select,code,pre,kbd,samp,[contenteditable=""],[contenteditable="true"]';
   // Italics, quotes and definition markup around a word or two name the word
   // rather than use it: "in der Schweiz sagt man <em>Velo</em>".
-  const MENTION = 'em,i,q,cite,dfn,abbr,var,blockquote';
+  const MENTION = 'em,i,q,cite,dfn,abbr,var';
   const BLOCK = 'p,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dd,dt,section,article,main,div,body';
   const GERMAN = /\b(der|die|das|den|dem|des|und|ist|sind|war|nicht|mit|für|ein|eine|einen|einem|von|zu|zum|zur|auf|sich|wir|wird|werden|auch|aber|oder|im|am|beim|vom|bei|dass|haben|hat|habe|hast|hatte|kann|muss|nach|über|nur|noch|wie|was|schon|sehr|man|als|wenn|ich|mir|mich|dir|uns|euch|bin|bist|mein|meine|dein|sein|seine|kein|keine|wurde|bitte|danke|viele|heute|gestern|jetzt|hier|dort)\b/gi;
   const blocks = new WeakMap();
@@ -73,7 +88,7 @@
     if (!r.changes && !choices) return;
     const rec = { orig: node.nodeValue, conv: r.changes ? r.text : node.nodeValue, counted: r.changes };
     originals.set(node, rec);
-    if (r.changes) { node.nodeValue = r.text; count += r.changes; }
+    if (r.changes) { node.nodeValue = r.text; count += r.changes; report(); }
     if (choices && llm) {
       const item = { node, rec, pieces: r.pieces, fixed: r.fixed };
       inView(node) ? queue.unshift(item) : queue.push(item);
@@ -99,6 +114,7 @@
       rec.counted = now;
       rec.conv = text;
       node.nodeValue = text;
+      report();
     }
     pumping = false;
   }
@@ -135,6 +151,7 @@
       }
     });
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    report();
   }
 
   function revert() {
@@ -144,6 +161,7 @@
     for (const [node, { orig, conv }] of originals) if (node.nodeValue === conv) node.nodeValue = orig;
     originals.clear();
     count = 0;
+    report();
   }
 
   function stop() {

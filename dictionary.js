@@ -273,6 +273,15 @@ globalThis.HD_DICT = {
     'fitness business express impressum password access fassade massiv massage ' +
     'ressourcen dossier possible class classic bass miss message cross').split(' '),
 
+  // Cues for ss-words whose two spellings are both real words. "pro" picks the
+  // ß spelling, "contra" keeps the Swiss one; without a hit the model decides.
+  ssCues: {
+    'masse,massen': {
+      pro: 'fenster|zimmer|raum|länge|breite|höhe|tiefe|messen|gemessen|zentimeter|millimeter|\bmeter\b|\bcm\b|\bmm\b|abmessung|zuschneiden|schrank|tisch|platte|genaue',
+      contra: 'menschen|menge|leute|publikum|konzert|strömte|kilogramm|gewicht|teig|flüssig|molekül|atom|kritische|erdmasse|muskel',
+    },
+  },
+
   // ss-words where both spellings are real words, so the context decides.
   ssContext: ['masse', 'massen', 'floss', 'flosse', 'flossen', 'schoss', 'russe', 'russen'],
 

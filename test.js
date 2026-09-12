@@ -74,10 +74,14 @@ const cases = [
   ['Die Ordnungsbusse beträgt 40 Franken.', 'Die Geldstrafe beträgt 40 Franken.'],
   ['Die Bussen fahren ab dem Bahnhof im Halbstundentakt.', 'Die Bussen fahren ab dem Bahnhof im Halbstundentakt.'],
 
+  // ss spellings the topic can settle without the model
+  ['Der Schreiner nahm die Masse des Fensters.', 'Der Tischler nahm die Maße des Fensters.', 'hamburg'],
+  ['Die Masse strömte nach dem Konzert auf die Strasse hinaus.', 'Die Masse strömte nach dem Konzert auf die Straße hinaus.'],
+
   // defaults without the model: choices keep the safe option
   ['Er musste eine Busse zahlen.', 'Er musste eine Geldstrafe zahlen.'], // "zahlen" is a cue
   ['Die Busse war hoch.', 'Die Busse war hoch.'],                        // no cue: model decides
-  ['Die Masse des Zimmers', 'Die Masse des Zimmers'],
+  ['Die Masse des Zimmers', 'Die Maße des Zimmers'], // "Zimmer" is a cue
   ['Wir zügeln morgen nach Bern.', 'Wir zügeln morgen nach Bern.'],
 
   // things referring back to a noun whose gender changed

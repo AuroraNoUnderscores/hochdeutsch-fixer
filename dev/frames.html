@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Notizen in a srcdoc frame</title>
+<body>
+<iframe id="f" style="width:99%;height:230px" sandbox="allow-scripts allow-same-origin" srcdoc='
+<!doctype html><meta charset="utf-8"><body>
+<div class="note">Die Masse str&#246;mte nach dem Konzert auf die Strasse hinaus.</div>
+<div class="note">Der Schreiner nahm die Masse des Fensters, bevor er den Rahmen bestellte.</div>
+<div class="note">Wegen des Streiks fahren heute keine Busse in die Innenstadt.</div>
+<div class="note">Der Richter verh&#228;ngte eine Busse von zweihundert Franken.</div>
+<div class="note">Er hat immer ein Ass im &#196;rmel, wenn es ums Pokern geht.</div>
+<div class="note">Ich ass letzte Woche zum ersten Mal Fondue.</div>
+<div class="note">Die Katze rollte sich auf seinem Schoss zusammen und schlief ein.</div>
+<div class="note">Der Biathlet schoss zweimal daneben und musste eine Strafrunde drehen.</div>
+<div class="note">K&#246;nnen wir das draussen machen? Es ist so ein sch&#246;ner Tag.</div>
+<div class="note">Der Spass h&#246;rt auf, sobald sich jemand verletzt.</div>
+</body>'></iframe>
+<pre id="result"></pre>
+
+<script type="module">
+  import { load, score } from '../llm.js';
+  const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
+  const frame = document.getElementById('f');
+  await new Promise(r => frame.contentDocument.readyState === 'complete' ? r() : frame.addEventListener('load', r));
+  const doc = frame.contentDocument, win = frame.contentWindow;
+  const before = [...doc.querySelectorAll('.note')].map(n => n.textContent);
+
+  await load();
+  const rank = async jobs => {
+    const picks = [];
+    for (const j of jobs) { const s = await score(j.texts); picks.push(s.indexOf(Math.max(...s))); }
+    return picks;
+  };
+  // Stub the extension API inside the frame, then inject exactly what the
+  // manifest injects (this is what match_about_blank makes the browser do).
+  win.browser = {
+    storage: { local: { get: async () => ({ mode: 'hamburg', llm: true }), set: async () => {} }, onChanged: { addListener() {} } },
+    runtime: { onMessage: { addListener() {} }, sendMessage: async m => m?.type === 'rank' ? rank(m.jobs) : m?.type === 'top-host' ? 'claude.ai' : null },
+  };
+  for (const f of ['../dictionary.js', '../morph.js', '../engine.js', '../content.js']) {
+    const src = await (await fetch(f)).text();
+    win.eval(src);
+  }
+  await new Promise(r => setTimeout(r, 6000));
+  const after = [...doc.querySelectorAll('.note')].map(n => n.textContent);
+  before.forEach((b, i) => log(b === after[i] ? `   ${b}` : `-> ${after[i]}`));
+</script>
+</body>
+</html>
