@@ -6,7 +6,7 @@ import { score, eszett } from '../llm.js';
 export async function rank(jobs) {
   const picks = [];
   for (const j of jobs) {
-    if (j.type === 'eszett') { picks.push(await eszett(j.text, j.offsets)); continue; }
+    if (j.type === 'eszett') { picks.push(await eszett(j.text, j.offsets, j.spans)); continue; }
     picks.push(globalThis.HD_PICK(await score(j.texts), j));
   }
   return picks;

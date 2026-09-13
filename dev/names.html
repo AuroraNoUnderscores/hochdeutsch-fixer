@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Names are kept</title>
+<body style="white-space:pre;font-family:monospace"></body>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../coverage.js"></script>
+<script src="../german_too.js"></script>
+<script src="../engine.js"></script>
+<script src="rank.js"></script>
+<script type="module">
+  // The whole engine with the eszett model's name columns: a word the rules
+  // changed goes back when it is part of a name. A handful of sentences to check
+  // the plumbing end to end; how well the model finds names is measured in
+  // training/names_eval.py on held-out data.
+  import { load } from '../llm.js';
+  import { rank } from './ranker.js';
+  const E = globalThis.HD_ENGINE;
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+
+  // [input, expected after the model decides]
+  const cases = [
+    ['Theodor Heuss war der erste Bundespräsident.', 'Theodor Heuss war der erste Bundespräsident.'],
+    ['Herr Weiss kommt morgen vorbei.', 'Herr Weiss kommt morgen vorbei.'],
+    ['Ich weiss es nicht.', 'Ich weiß es nicht.'],
+    ['Das Heiligen-Geist-Spital in Bern wurde renoviert.', 'Das Heiligen-Geist-Spital in Bern wurde renoviert.'],
+    ['Sie liegt seit Montag im Spital.', 'Sie liegt seit Montag im Krankenhaus.'],
+    ['Er wurde ins Kinderspital Zürich gebracht.', 'Er wurde ins Kinderspital Zürich gebracht.'],
+    ['Die Forscherin Lucie Poulet lebt ein Jahr auf Hawaii.', 'Die Forscherin Lucie Poulet lebt ein Jahr auf Hawaii.'],
+    ['Zum Znacht gibt es Poulet mit Reis.', 'Zum Abendessen gibt es Hähnchen mit Reis.'],
+    ['Die Firma von Herrn Weiss baut an der Bahnhofstrasse.', 'Die Firma von Herrn Weiss baut an der Bahnhofstraße.'],
+    ['Das Konzert findet in Strassburg statt.', 'Das Konzert findet in Straßburg statt.'],
+    ['Mit dem Velo fahre ich zur Arbeit.', 'Mit dem Fahrrad fahre ich zur Arbeit.'],
+    ['Der Entscheid ist gefallen. Er war knapp.', 'Die Entscheidung ist gefallen. Sie war knapp.'],
+  ];
+
+  const t0 = performance.now();
+  await load(() => {});
+  log(`models ready in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
+
+  let fail = 0;
+  for (const [input, want] of cases) {
+    const r = E.convert(input, { mode: 'neutral' });
+    const before = E.renderPieces(r.pieces);
+    await E.resolve(r.pieces, rank);
+    const got = E.renderPieces(r.pieces);
+    const names = r.pieces.filter(p => typeof p === 'object' && p.nameInfo)
+      .map(p => `${p.orig}:${p.nameInfo.kind} ${p.nameInfo.p.toFixed(2)}`).join(', ');
+    if (got !== want) { fail++; log(`FAIL\n  in:    ${input}\n  rules: ${before}\n  want:  ${want}\n  got:   ${got}\n  names: ${names}`); }
+    else log(`ok    ${got}   [${names}]`);
+  }
+  log(`\n${cases.length - fail}/${cases.length} passed`);
+</script>

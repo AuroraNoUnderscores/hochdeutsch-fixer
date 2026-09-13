@@ -43,7 +43,7 @@ class Model:
         enc = self.tok(swiss, return_offsets_mapping=True, truncation=True, max_length=256, return_tensors="pt")
         offsets = enc.pop("offset_mapping")[0].tolist()
         logits = self.model(**{k: v.to(self.device) for k, v in enc.items()}).logits[0]
-        prob = torch.softmax(logits.float(), -1)[:, 1].tolist()
+        prob = torch.softmax(logits[:, :2].float(), -1)[:, 1].tolist()   # columns 0-1 are ss/ß
         out = {}
         for start, _ in decisions(swiss, [False] * len(swiss)):
             for t, (a, b) in enumerate(offsets):

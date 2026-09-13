@@ -5,6 +5,7 @@
 <script src="../dictionary.js"></script>
 <script src="../morph.js"></script>
 <script src="../coverage.js"></script>
+<script src="../german_too.js"></script>
 <script src="../engine.js"></script>
 <script src="rank.js"></script>
 <script type="module">
@@ -40,6 +41,10 @@
     ['Die Finken zwitschern.', 'Die Finken zwitschern.'],
     ['Das Velo, das ich gekauft habe, ist rot.', 'Das Fahrrad, das ich gekauft habe, ist rot.'],
     ['Der Unterbruch dauerte lange. Er war teuer.', 'Die Unterbrechung dauerte lange. Sie war teuer.'],
+    // dictionary words that are ordinary German too: the model may keep them
+    ['Das Haus liegt am Rande der Stadt.', 'Das Haus liegt am Rande der Stadt.'],
+    ['Entscheide dich jetzt für eine Farbe.', 'Entscheide dich jetzt für eine Farbe.'],
+    ['Velos sind im Park verboten.', 'Fahrräder sind im Park verboten.'],
   ];
 
   const t0 = performance.now();

@@ -255,7 +255,7 @@
       const noun = findNoun(t, w);
       if (noun) { tok.noun = noun; continue; }
       const hit = lookup(t, w);
-      if (hit !== undefined) { tok.s = matchCase(w, hit); continue; }
+      if (hit !== undefined) { tok.s = matchCase(w, hit); nameable(tok); continue; }
       const end = tok.at + w.length;
       const start = Math.max(text.lastIndexOf('.', tok.at), text.lastIndexOf('!', tok.at), text.lastIndexOf('?', tok.at)) + 1;
       const v = verb(t, w, text.slice(start, tok.at), text.slice(end, end + 40));
@@ -277,6 +277,7 @@
         const ruleWord = typeof rule === 'string' ? rule : w;
         const form = w.toLowerCase();
         tok.piece = { kind: 'eszett', word: w, at: tok.at, rule: ruleWord, form,
+                      name: [tok.at, tok.at + w.length],
                       cue: decide(t.ssCues.get(form), sentence),
                       // Mid-sentence, capitalisation fixes the word class, and for
                       // these words the word class fixes the spelling: "Aß" cannot
@@ -285,9 +286,23 @@
                       options: [...new Set([w, ruleWord])], pick: ruleWord === w ? 0 : 1 };
         continue;
       }
-      if (typeof rule === 'string') tok.s = rule;
+      if (typeof rule === 'string') { tok.s = rule; nameable(tok); }
       else if (rule) tok.piece = rule;
     }
+  }
+
+  // A capitalised word the rules changed could be part of a name: "Heiligen-Geist-
+  // Spital", "Lucie Poulet", "Kinderspital Zürich". The change becomes a piece the
+  // eszett model can veto, since the same pass also marks names (training/names_data.py).
+  function nameable(tok, piece) {
+    if (!isUpper(tok.w[0])) return piece;
+    if (!piece) {
+      if (tok.s === tok.w) return;
+      piece = { options: [tok.s], pick: 0, rank: false };
+      tok.piece = piece;
+    }
+    piece.name = [tok.at, tok.at + tok.w.length];
+    return piece;
   }
 
   // Non-overlapping "ss" pairs in a word, as the model was trained to see them.
@@ -340,7 +355,11 @@
     return allCaps(w) ? words.toUpperCase() : words;
   }
 
-  function npPass(tokens) {
+  // Dictionary words that are also ordinary German ("am Rande", "der Store"),
+  // from a web crawl (training/german_too.py).
+  const GERMAN_TOO = new Set(root.HD_GERMAN_TOO || []);
+
+  function npPass(tokens, text) {
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       if (!tok.noun || tok.skip) continue;
@@ -364,7 +383,13 @@
       const num = !det && (NUMERALS.has(tokens[start - 2]?.w?.toLowerCase()) || /(?:^|\D)(?:[2-9]|\d{2,})\s*$/.test(ctxBefore)) ? 'pl' : null;
 
       const outs = M.rewrite(e, { det, prep, adjs, num, noun: tok.noun.noun, prefix: tok.noun.prefix });
-      if (!outs.length) { tok.s = fallbackNoun(e, tok.noun, tok.w); continue; }
+      const alsoGerman = GERMAN_TOO.has(e.sLemma) || GERMAN_TOO.has(tok.w);
+      if (!outs.length) {
+        const fallback = fallbackNoun(e, tok.noun, tok.w);
+        if (alsoGerman) nameable(tok, tok.piece = { options: [tok.w, fallback], pick: 1, conf: CONF.word });
+        else { tok.s = fallback; nameable(tok); }
+        continue;
+      }
       const renderOut = o => {
         let s = '';
         for (let x = start; x <= i; x++) {
@@ -377,8 +402,17 @@
         return s;
       };
       const options = [...new Set(outs.map(renderOut))];
-      setSpan(tokens, start, i, options.length === 1 ? options[0] : { options, pick: 0, conf: CONF.form });
-      followUps(tokens, i, outs[0].oldCell, outs[0].cell);
+      // The original stays a candidate where it may be German after all: a word
+      // German also uses, or a bare noun opening a sentence, where German puts
+      // verbs ("Entscheide dich"). The model keeps it only when clearly better.
+      const bareStart = !det && !adjs.length && atSentenceStart(text, tok.at);
+      const orig = tokens.slice(start, i + 1).map(t2 => t2.w ?? t2.s).join('');
+      const piece = alsoGerman || bareStart
+        ? { options: [orig, ...options], pick: 1, conf: CONF.word }
+        : options.length === 1 ? { options, pick: 0, rank: false } : { options, pick: 0, conf: CONF.form };
+      setSpan(tokens, start, i, piece);
+      nameable(tok, piece);
+      followUps(tokens, i, outs[0].oldCell, outs[0].cell, piece);
     }
   }
 
@@ -387,8 +421,14 @@
   // German pronouns agree with their antecedent's gender, so this is a rule; the
   // model is no help here (it prefers the old pronoun even when nothing matches it).
   // Stop at the first other noun, which could be the real antecedent.
-  function followUps(tokens, i, oldCell, newCell) {
+  function followUps(tokens, i, oldCell, newCell, dep) {
     if (oldCell === newCell) return;
+    // A pronoun only changes because the noun did; if the noun turns out to be
+    // part of a name and is kept, so is the pronoun.
+    const follow = (tk, forms, extra) => {
+      tk.piece = forms.length === 1 ? { options: forms, pick: 0, rank: false, dep }
+                                    : { options: forms, pick: 0, conf: CONF.form, dep, ...extra };
+    };
     if (tokens[i + 1] && !tokens[i + 1].w && /^,\s*$/.test(tokens[i + 1].s)) {
       let r = i + 2;
       if (tokens[r]?.w && M.PREP[tokens[r].s.toLowerCase()] && isSpace(tokens[r + 1])) r += 2;
@@ -396,10 +436,7 @@
       if (free(tk)) {
         const forms = [...new Set(M.relMap(tk.s, oldCell, newCell).map(f => matchCase(tk.s, f)))].filter(f => f !== tk.s);
         const nounNext = isSpace(tokens[r + 1]) && tokens[r + 2]?.w && isUpper(tokens[r + 2].w[0]);
-        if (forms.length && !nounNext) {              // a noun after it means "das" was an article
-          if (forms.length === 1) tk.s = forms[0];
-          else tk.piece = { options: forms, pick: 0, conf: CONF.form }; // which case: model decides
-        }
+        if (forms.length && !nounNext) follow(tk, forms);   // a noun after it means "das" was an article; several forms: model picks the case
       }
     }
     if (oldCell === 'p' || newCell === 'p') return;
@@ -423,8 +460,7 @@
       // "… auf dem Trottoir. Weil es so heiss war" is about the weather, not the pavement.
       if (blocked || (ends && !first)) continue;
       if (tk.s.toLowerCase() === 'es' && impersonal(tokens, x)) continue;
-      if (forms.length === 1) tk.s = forms[0];
-      else tk.piece = { options: forms, pick: 0, ctx: 2, conf: CONF.form }; // which case: model decides
+      follow(tk, forms, { ctx: 2 });                   // several forms: model picks the case
     }
   }
 
@@ -578,7 +614,10 @@
 
   // ---------- rendering and model hand-off ----------
 
-  const pieceText = p => typeof p === 'string' ? p : p.options[p.pick];
+  // Kept as written: part of a name, or a pronoun that only changed because its
+  // noun did, when that noun is kept (a name, or the model preferred the original).
+  const kept = p => p.named || (p.dep && pieceText(p.dep) === p.dep.orig);
+  const pieceText = p => typeof p === 'string' ? p : kept(p) ? p.orig : p.options[p.pick];
   const renderPieces = pieces => pieces.map(pieceText).join('');
 
   function render(tokens, fixed, source) {
@@ -602,7 +641,7 @@
 
   // How many choices currently differ from the original text.
   const countChoices = pieces =>
-    pieces.filter(p => typeof p === 'object' && p.options[p.pick] !== p.orig).length;
+    pieces.filter(p => typeof p === 'object' && pieceText(p) !== p.orig).length;
 
   function convert(text, opts = {}) {
     const t = tables(opts.mode || 'hamburg');
@@ -620,7 +659,7 @@
     for (const m of text.matchAll(/(\p{L}+)|[^\p{L}]+/gu))
       tokens.push(m[1] ? { w: m[1], s: m[1], at: m.index } : { s: m[0], at: m.index });
     wordPass(t, text, tokens, opts.context);
-    npPass(tokens);
+    npPass(tokens, text);
     sein2habenPass(tokens);
     esHatPass(tokens);
     woPass(tokens);
@@ -652,16 +691,19 @@
   async function resolve(pieces, rank) {
     const jobs = [];
     const eszettPieces = [];
+    const namePieces = [];
     pieces.forEach((p, q) => {
       if (typeof p !== 'object') return;
+      if (p.name) namePieces.push(p);
       if (p.kind === 'eszett') { eszettPieces.push(p); return; }
+      if (p.rank === false) return;                     // nothing to rank, only a name check
       jobs.push({ q, key: p.key, cf: p.cf, def: p.pick, conf: p.conf ?? CONF.form,
                   opts: p.options, texts: candidates(pieces, q) });
     });
-    // All ss decisions of a text go to the eszett model in one pass.
-    if (eszettPieces.length) {
+    // All ss decisions and name checks of a text go to the eszett model in one pass.
+    if (eszettPieces.length || namePieces.length) {
       const offsets = eszettPieces.flatMap(p => ssPairs(p.word).map(i => p.at + i));
-      jobs.push({ type: 'eszett', text: pieces.source, offsets });
+      jobs.push({ type: 'eszett', text: pieces.source, offsets, spans: namePieces.map(p => p.name) });
     }
     if (!jobs.length) return false;
     const picks = await rank(jobs);
@@ -670,12 +712,33 @@
     jobs.forEach((j, n) => {
       const pick = picks[n];
       if (j.type === 'eszett') {
-        if (Array.isArray(pick)) moved = applyEszett(eszettPieces, pick) || moved;
+        const { ss, names } = Array.isArray(pick) ? { ss: pick } : pick ?? {};   // an array: model without names
+        if (names) moved = applyNames(namePieces, names) || moved;
+        if (Array.isArray(ss)) moved = applyEszett(eszettPieces, ss) || moved;
         return;
       }
       if (pick == null || pick === pieces[j.q].pick) return;
       pieces[j.q].pick = pick;
       moved = true;
+    });
+    return moved;
+  }
+
+  // The model marks names; a word the rules changed inside one goes back to how it
+  // was written ("Heiligen-Geist-Spital"). The ss/ß spelling is kept only for
+  // people ("Herr Weiss"): places, organisations and titles take ß like any word
+  // ("in Straßburg", "Universitätsklinik Gießen"). Keeping those too made 6.45
+  // errors per 1000 on held-out web text, people only 4.72 (dev/heldout.html).
+  const NAME_MIN = () => root.HD_NAME_MIN ?? 0.5;       // overridable for measurement
+  const KEEPS_SPELLING = () => new Set((root.HD_NAME_KEEPS ?? 'PER').split(','));   // overridable for measurement
+
+  function applyNames(namePieces, names) {
+    let moved = false;
+    namePieces.forEach((p, k) => {
+      const n = names[k];
+      const named = !!n && n.p > NAME_MIN() && (p.kind !== 'eszett' || KEEPS_SPELLING().has(n.kind));
+      if (named !== !!p.named) { p.named = named; moved = true; }
+      p.nameInfo = n;
     });
     return moved;
   }

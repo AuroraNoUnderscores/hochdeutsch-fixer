@@ -2,4 +2,4 @@
 // spelling of the words that have topic cues, as [ss, ß] over unique
 // training sentences. Where a spelling was nearly absent, the model's
 // opinion of it is a prior rather than evidence, and the cue decides.
-globalThis.HD_COVERAGE = {"busse": [619, 117], "bussen": [169, 3], "masse": [1098, 782], "massen": [215, 143]};
+globalThis.HD_COVERAGE = {"busse": [12167, 1293], "bussen": [4893, 3], "masse": [26779, 26780], "massen": [6746, 6668]};

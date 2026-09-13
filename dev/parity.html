@@ -14,7 +14,7 @@
   const bad = [];
   for (const [i, r] of rows.entries()) {
     if (i % 25 === 0) { document.title = `${i}/${rows.length}`; await new Promise(res => setTimeout(res, 0)); }
-    const js = await eszett(r.swiss, r.pairs.map(p => p[0]));
+    const js = (await eszett(r.swiss, r.pairs.map(p => p[0]))).ss;
     r.pairs.forEach(([at, py], k) => {
       if (js[k] == null) { missing++; return; }
       n++;

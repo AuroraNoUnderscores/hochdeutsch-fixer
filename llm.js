@@ -137,14 +137,24 @@ function chunks(text) {
   return out;
 }
 
-// Probability that the "ss" starting at each offset is ß in German spelling.
-// null where the text could not be aligned; the rules decide those.
-export async function eszett(text, offsets) {
+// Output columns 2-6 of a model trained with names (training/names_data.py).
+export const NAME_KINDS = ['O', 'PER', 'ORG', 'LOC', 'OTH'];
+
+// One pass over the text answers two questions:
+// - ss: probability that the "ss" starting at each offset is ß in German spelling
+// - names: for each [start, end) span, how likely it is part of a name and which
+//   kind ({ p, kind }), from the word's most name-like token
+// null where the text could not be aligned (the rules decide those), and names
+// is null altogether for a model trained without them.
+export async function eszett(text, offsets, wordSpans = []) {
   const { tokenizer, model } = await loadEszett();
   const probs = offsets.map(() => null);
+  const names = wordSpans.map(() => null);
+  let hasNames = false;
   for (const [a, b] of chunks(text)) {
     const want = offsets.map((o, k) => [o, k]).filter(([o]) => o >= a && o < b);
-    if (!want.length) continue;
+    const wantSpans = wordSpans.map((s, k) => [s, k]).filter(([s]) => s[0] >= a && s[1] <= b);
+    if (!want.length && !wantSpans.length) continue;
     const piece = text.slice(a, b);
     const tokens = tokenizer.tokenize(piece);
     const enc = tokenizer(piece, { truncation: true, max_length: 512 });
@@ -160,6 +170,21 @@ export async function eszett(text, offsets) {
       const e0 = Math.exp(L[i]), e1 = Math.exp(L[i + 1]);
       probs[k] = e1 / (e0 + e1);
     }
+    if (C < 2 + NAME_KINDS.length) continue;
+    hasNames = true;
+    for (const [[s0, s1], k] of wantSpans) {
+      let best = null;
+      spans.forEach((s, t) => {
+        if (!s || s[1] <= s0 - a || s[0] >= s1 - a) return;
+        const i = (t + 1) * C + 2;
+        const top = Math.max(...NAME_KINDS.map((_, c) => L[i + c]));
+        const e = NAME_KINDS.map((_, c) => Math.exp(L[i + c] - top));
+        const sum = e.reduce((x, y) => x + y, 0);
+        const p = 1 - e[0] / sum;
+        if (!best || p > best.p) best = { p, kind: NAME_KINDS[1 + e.slice(1).indexOf(Math.max(...e.slice(1)))] };
+      });
+      names[k] = best;
+    }
   }
-  return probs;
+  return { ss: probs, names: hasNames ? names : null };
 }

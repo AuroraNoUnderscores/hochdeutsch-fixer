@@ -46,11 +46,15 @@
   "do_lower_case": false,
   "extra_special_tokens": {},
   "mask_token": "[MASK]",
+  "max_length": 128,
   "model_max_length": 512,
   "pad_token": "[PAD]",
   "sep_token": "[SEP]",
+  "stride": 0,
   "strip_accents": null,
   "tokenize_chinese_chars": true,
   "tokenizer_class": "DistilBertTokenizer",
+  "truncation_side": "right",
+  "truncation_strategy": "longest_first",
   "unk_token": "[UNK]"
 }

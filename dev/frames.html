@@ -40,7 +40,7 @@
     storage: { local: { get: async () => ({ mode: 'hamburg', llm: true }), set: async () => {} }, onChanged: { addListener() {} } },
     runtime: { onMessage: { addListener() {} }, sendMessage: async m => m?.type === 'rank' ? rank(m.jobs) : m?.type === 'top-host' ? 'claude.ai' : null },
   };
-  for (const f of ['../dictionary.js', '../morph.js', '../coverage.js', '../engine.js', '../content.js']) {
+  for (const f of ['../dictionary.js', '../morph.js', '../coverage.js', '../german_too.js', '../engine.js', '../content.js']) {
     const src = await (await fetch(f)).text();
     win.eval(src);
   }

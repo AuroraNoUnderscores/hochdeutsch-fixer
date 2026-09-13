@@ -5,13 +5,15 @@
 <script src="../dictionary.js"></script>
 <script src="../morph.js"></script>
 <script src="../coverage.js"></script>
+<script src="../german_too.js"></script>
 <script src="../engine.js"></script>
 <script src="rank.js"></script>
 <script type="module">
-  // Grades the current engine's ss/ß decisions on held-out Wikipedia sentences
-  // (training/data/test_sample.json), the same text the fine-tuned model is
-  // graded on. Only sentences where the engine changed nothing but ss/ß are
-  // counted, so every decision lines up with the original unambiguously.
+  // Grades the current engine's ss/ß decisions on held-out sentences the model
+  // never trained on: ?set=wiki or ?set=web (training/data/v2, split by article
+  // and by website), or the original Wikipedia sample without ?set. Only
+  // sentences where the engine changed nothing but ss/ß are counted, so every
+  // decision lines up with the original unambiguously.
   import { load, score } from '../llm.js';
   import { rank as sharedRank } from './ranker.js';
   const E = globalThis.HD_ENGINE;
@@ -20,6 +22,7 @@
   const useLlm = q.get('llm') === '1';
   const limit = +(q.get('n') || 3000);
   if (q.has('margin')) globalThis.HD_ESZETT_MARGIN = +q.get('margin');
+  if (q.has('keeps')) globalThis.HD_NAME_KEEPS = q.get('keeps');   // name kinds whose ss spelling is kept
 
   function swissify(t) {
     let s = '';
@@ -37,7 +40,10 @@
     return out;
   }
 
-  const german = (await (await fetch('../training/data/test_sample.json')).json()).slice(0, limit);
+  const set = q.get('set');
+  const german = (set
+    ? (await (await fetch(`../training/data/v2/test_${set}.txt`)).text()).split(/\r?\n/).filter(Boolean)
+    : await (await fetch('../training/data/test_sample.json')).json()).slice(0, limit);
   if (useLlm) await load();
   const rank = async jobs => {
     const picks = [];
@@ -46,7 +52,7 @@
   };
 
   let right = 0, wrong = 0, skipped = 0;
-  const errors = [], rulesErrors = [], byPath = {};
+  const errors = [], rulesErrors = [], nameErrors = [], byPath = {};
   const t0 = performance.now();
   for (const [n, g] of german.entries()) {
     if (n % 25 === 0) { document.title = `${n}/${german.length}`; await new Promise(r => setTimeout(r, 0)); }
@@ -62,19 +68,23 @@
       else {
         wrong++;
         // which path decided this word: the eszett model, or rules before it
-        const viaModel = r.pieces.some(pc => pc && pc.kind === 'eszett' && pc.at <= at && at < pc.at + pc.word.length);
-        const why = viaModel ? 'model' : 'rules';
+        const piece = r.pieces.find(pc => pc && pc.kind === 'eszett' && pc.at <= at && at < pc.at + pc.word.length);
+        // a word kept because the model took it for a name counts apart
+        const why = piece?.named ? 'kept as name' : piece ? 'model' : 'rules';
         byPath[why] = (byPath[why] || 0) + 1;
         if (why === 'rules' && rulesErrors.length < 25) rulesErrors.push(`${label ? 'ß' : 'ss'} expected: ...${swiss.slice(Math.max(0, at - 30), at + 30)}...`);
+        if (why === 'kept as name' && nameErrors.length < 25) nameErrors.push(`${label ? 'ß' : 'ss'} expected: ...${swiss.slice(Math.max(0, at - 30), at + 30)}...`);
         if (errors.length < 15) errors.push(`[${why}] ${label ? 'ß' : 'ss'} expected: ...${swiss.slice(Math.max(0, at - 30), at + 30)}...`);
       }
     });
   }
-  log(`engine [${useLlm ? 'rules + models, margin ' + (globalThis.HD_ESZETT_MARGIN ?? 0.1) : 'rules only'}], ${german.length} held-out sentences`);
+  log(`${set ? 'test_' + set : 'Wikipedia sample'}: engine [${useLlm ? 'rules + models, margin ' + (globalThis.HD_ESZETT_MARGIN ?? 0.1) : 'rules only'}], ${german.length} held-out sentences`);
   log(`${wrong} errors in ${right + wrong} decisions = ${(1000 * wrong / (right + wrong)).toFixed(2)} per 1000`);
   log(`(${skipped} sentences skipped because the engine also changed vocabulary; ${((performance.now() - t0) / 1000).toFixed(1)}s)\n`);
   log(`errors by path: ${JSON.stringify(byPath)}
 `);
   log('decided by rules, not the model:');
   rulesErrors.forEach(e => log('  ' + e));
+  log('\nkept as a name:');
+  nameErrors.forEach(e => log('  ' + e));
 </script>

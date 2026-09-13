@@ -42,7 +42,7 @@ async function rank(jobs) {
     const picks = [];
     for (const j of jobs) {
       if (j.type === 'eszett') {                        // ss/ß for a whole text, one pass
-        picks.push(await eszett(j.text, j.offsets));
+        picks.push(await eszett(j.text, j.offsets, j.spans));
         state.decided += j.offsets.length;
         continue;
       }

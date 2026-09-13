@@ -21,9 +21,9 @@ Two passes over every text node:
 2. **Two small models** (`llm.js`, hosted by `background.js`), both German
    DistilBERT running locally on WASM, no GPU needed:
    - **eszett** — fine-tuned for this extension to decide, for every "ss", whether
-     German spells it ß. Bundled in `models/hdfx-eszett` (64 MB). It reads each
-     text once and settles every ss/ß in it. How it was trained is in
-     [training/](training/README.md).
+     German spells it ß, and which words are part of a name. Bundled in
+     `models/hdfx-eszett` (64 MB). It reads each text once and answers both for
+     all of it. How it was trained is in [training/](training/README.md).
    - **general** — the untouched base model, downloaded once (~92 MB), which only
      ranks the few remaining candidates: article forms and grammar wording.
 
@@ -33,16 +33,43 @@ produced.
 ### Why a trained model decides ss/ß, not rules
 
 On sentences from articles nobody tuned anything on, hand-written ss/ß rules got
-28.8 of every 1000 decisions wrong. The eszett model, trained on 1.17 million
-Wikipedia sentences whose correct spelling came for free (turn every ß into ss,
-and the original is the answer), gets 10.6 wrong end to end — including the
-collisions a list cannot settle: *die Masse strömte* vs *die Maße meines Koffers*,
-*ein Ass* vs *ich aß*, *keine Busse fahren* vs *eine Buße zahlen*.
+28.8 of every 1000 decisions wrong. The eszett model is trained on 23 million
+sentences whose correct spelling came for free (turn every ß into ss, and the
+original is the answer): German Wikipedia plus everyday German from the web,
+cleaned of Swiss and misspelt pages. On held-out web text it gets 3.98 of 1000
+wrong, on held-out Wikipedia 5.66, including the collisions a list cannot settle:
+*die Masse strömte* vs *die Maße des Fensters*, *ein Ass* vs *ich aß*, *keine
+Busse fahren* vs *eine Buße zahlen*. Wikipedia alone was not enough: an
+encyclopedia hardly ever takes the measurements of a window.
 
 The rules' answer only stands where the model is unsure (probability between 0.4
 and 0.6), and a topic cue only outranks it for a spelling the model barely saw in
 training (`coverage.js`: plural "Bußen" occurred 3 times). On unseen text the
 cues are otherwise less reliable than the model.
+
+### Names are left alone
+
+"Herr Weiss" is not "Herr Weiß", the "Heiligen-Geist-Spital" is no
+"Heiligen-Geist-Krankenhaus", and "Lucie Poulet" keeps her surname. The eszett
+model also marks names (people, organisations, places, titles), trained on
+GermEval 2014 and on web sentences with Swiss words swapped in, so that "im Spital"
+still becomes "im Krankenhaus" while "Kinderspital Zürich" stays. Any word the
+rules changed goes back when the model says it is part of a name, and so does a
+pronoun that only changed because of it. For ss/ß only people keep their
+spelling: places, organisations and titles take ß like any word ("Bahnhofstraße",
+"in Straßburg"). Keeping organisations and titles too measured 6.45 instead of
+4.72 errors per 1000 on held-out web text, since German writes "Universitätsklinik
+Gießen" and "Stiftung Preußischer Kulturbesitz". The price: a company named after
+someone ("Weiss AG") becomes "Weiß AG".
+
+### Words that are German too
+
+Some Swiss words are also ordinary German with another meaning: "am Rande" is not
+beetroot, a "Store" is often a shop, "Entscheide dich" is a verb. Which dictionary
+words those are was measured on a web crawl (`german_too.js`: about as common on
+.de pages as on .ch pages). For them, and for a bare noun opening a sentence where
+German puts verbs, the original stays a candidate and the general model keeps it
+when it reads clearly better.
 
 ### Text about words is left alone
 
@@ -89,7 +116,9 @@ is ordinary German and stays.
 | --- | --- | --- |
 | Vocabulary, compounds, numbers, known ß stems | rules | unambiguous |
 | Articles, adjective endings, case and number after a gender change | rules, model picks when the case is ambiguous ("ein Keks" vs "einen Keks") | |
-| every ss/ß | eszett model, rules where it is unsure | measured 3× fewer errors than rules on unseen text |
+| every ss/ß | eszett model, rules where it is unsure | measured 5× fewer errors than rules on unseen text |
+| Is a changed word part of a name? | eszett model | a name is a fact about the text, not the word |
+| Dictionary words that are also German (Rande, Store, Estrich) | general model may keep the original | measured on a crawl which words these are |
 | Words that are also German with another meaning (Busse, Finken, tönen) | cue words in the surrounding block, else the model | the model only judges how a sentence sounds and cannot know a page is about speeding fines |
 | "zügeln" → "umziehen", incl. moving the particle to the clause end | model | word order |
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
@@ -136,7 +165,10 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 - `dev/key.html` — the 44 notes of the test artifact against its answer key
   (`dev/corpus.js`), rules plus model; `?mode=neutral` for the other flavour,
   `?llm=0` for rules only.
-- `dev/e2e.html` — rules + model, 15 cases.
+- `dev/heldout.html?llm=1&set=web` (or `set=wiki`) — the engine on held-out web
+  sentences from sites the model never saw, errors split by path.
+- `dev/e2e.html` — rules + model, 21 cases.
+- `dev/names.html` — names kept, ordinary words still changed, end to end.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
 - `dev/bg.html` — background page: model loading, ranking, caching.
 - `dev/chch.html` — a real page (ch.ch speeding fines) run through the content
@@ -177,5 +209,14 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
   mistakes. The popup tells you when that is why nothing changed.
 - The eszett model is bundled (64 MB); the general model downloads ~92 MB on first
   use. Until they answer, the rules' spellings stand.
-- "die Masse des Fensters" still comes out as Masse: an encyclopedia rarely talks
-  about measuring a window, so that sense is under-represented in training.
+- Names are only protected with Baby LLM on, and the rules' change shows for a
+  moment before the model puts a name back.
+- Name misses: brand names built from Swiss words (VeloStrom, "Velo Pro") and
+  names with a letter or number ("Natel A") can still be rewritten. On a
+  hand-labelled sample the model kept 21 of 30 such names and never kept an
+  ordinary word.
+- The model reads a paragraph at once. That usually helps, but in the long test
+  note "die Masse der Zuschauer" early on pulls "die Masse meines Koffers" later
+  to the crowd sense; and "Herzlichen Gruss aus Zürich" stays Gruss, because web
+  pages write "Gruss" often enough to muddle the labels. 42 of the 44 test notes
+  match their answer key.

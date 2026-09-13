@@ -35,7 +35,7 @@ def probs(session, tok, rows):
             t = next((i for i, (a, b) in enumerate(offs) if a <= start < b), None)
             if t is None:
                 continue
-            e = np.exp(logits[t] - logits[t].max())
+            e = np.exp(logits[t][:2] - logits[t][:2].max())   # columns 0-1 are ss/ß
             out.append((float(e[1] / e.sum()), gold))
     return np.array(out)
 

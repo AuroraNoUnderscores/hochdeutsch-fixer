@@ -10,10 +10,20 @@
   "hidden_dim": 3072,
   "id2label": {
     "0": "ss",
-    "1": "\u00df"
+    "1": "\u00df",
+    "2": "name:O",
+    "3": "name:PER",
+    "4": "name:ORG",
+    "5": "name:LOC",
+    "6": "name:OTH"
   },
   "initializer_range": 0.02,
   "label2id": {
+    "name:LOC": 5,
+    "name:O": 2,
+    "name:ORG": 4,
+    "name:OTH": 6,
+    "name:PER": 3,
     "ss": 0,
     "\u00df": 1
   },

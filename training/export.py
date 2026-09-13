@@ -38,7 +38,7 @@ def grade(session, tok, limit=8000):
             for start, gold in decisions(swiss, origin):
                 for t, (a, b) in enumerate(offsets):
                     if a <= start < b:
-                        ok = int(logits[t].argmax()) == gold
+                        ok = int(logits[t][:2].argmax()) == gold   # columns 0-1 are ss/ß
                         right += ok
                         wrong += not ok
                         break
