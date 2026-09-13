@@ -8,11 +8,13 @@ async function refresh() {
   let llm = null, tab_ = null;
   try { llm = await browser.runtime.sendMessage({ type: 'llm-status' }); } catch {}
   try { tab_ = await browser.runtime.sendMessage({ type: 'tab-count', tabId: tab.id }); } catch {}
-  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm']);
+  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight']);
 
   $('enabled').checked = s.enabled !== false;
   $('mode').value = s.mode || 'hamburg';
   $('llm').checked = s.llm !== false;
+  $('highlight').checked = !!s.highlight;
+  showChanges(tab_);
 
   if (page) {
     host = page.host;
@@ -51,7 +53,53 @@ async function refresh() {
   }));
 }
 
+// Every word changed on the page (all frames), and the words the model kept
+// because they are part of a name. Rebuilt only when it differs, so the list
+// keeps its scroll position between refreshes.
+let shownChanges = '';
+function showChanges(total) {
+  const box = $('changes');
+  if (box.hidden) return;
+  const changes = total?.changes || [], names = total?.names || [];
+  const sig = JSON.stringify([changes, names]);
+  if (sig === shownChanges) return;
+  shownChanges = sig;
+  const row = (words, n) => {
+    const div = document.createElement('div');
+    const w = document.createElement('span');
+    w.className = 'words';
+    w.append(...words);
+    w.title = w.textContent;
+    div.append(w, Object.assign(document.createElement('span'), { className: 'n', textContent: n > 1 ? `×${n}` : '' }));
+    return div;
+  };
+  const items = [];
+  if (!changes.length && !names.length)
+    items.push(Object.assign(document.createElement('div'), { className: 'empty', textContent: 'Nothing changed on this page.' }));
+  if (changes.length) {
+    items.push(Object.assign(document.createElement('h4'), { textContent: 'Changed' }));
+    for (const [from, to, n] of changes)
+      items.push(row([Object.assign(document.createElement('s'), { textContent: from || '∅' }), ' → ',
+                      Object.assign(document.createElement('b'), { textContent: to || '∅' })], n));
+  }
+  if (names.length) {
+    items.push(Object.assign(document.createElement('h4'), { textContent: 'Kept as names' }));
+    for (const [word, n] of names) items.push(row([word], n));
+  }
+  box.replaceChildren(...items);
+}
+
 const later = () => setTimeout(refresh, 150);
+
+$('show-changes').onclick = e => {
+  const open = $('changes').hidden;
+  $('changes').hidden = !open;
+  e.target.setAttribute('aria-pressed', open);
+  e.target.textContent = open ? 'Hide changed words' : 'Show changed words';
+  shownChanges = '';
+  refresh();
+};
+$('highlight').onchange = e => browser.storage.local.set({ highlight: e.target.checked }).then(later);
 
 $('enabled').onchange = e => browser.storage.local.set({ enabled: e.target.checked }).then(later);
 $('mode').onchange = e => browser.storage.local.set({ mode: e.target.value }).then(later);

@@ -17,6 +17,18 @@
   #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #log b { font-weight: 600; color: var(--fg); }
   #log .kept { opacity: .65; }
+  button { font: inherit; width: calc(100% - 28px); margin: 2px 14px 8px; padding: 5px 0; border-radius: 6px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button:hover { border-color: var(--accent); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #changes { border-top: 1px solid var(--line); padding: 8px 14px; max-height: 240px; overflow-y: auto; font-size: 12px; line-height: 1.55; }
+  #changes h4 { margin: 6px 0 2px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  #changes h4:first-child { margin-top: 0; }
+  #changes div { display: flex; gap: 6px; }
+  #changes .words { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #changes s { color: var(--muted); }
+  #changes .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #changes .empty { color: var(--muted); }
 </style>
 <header><b>Moin!</b> Hochdeutsch-Fixer</header>
 <label>Enabled <input type="checkbox" id="enabled"></label>
@@ -28,6 +40,9 @@
   </select>
 </label>
 <label><span>Baby LLM</span> <input type="checkbox" id="llm"></label>
+<label><span>Highlight changes on page</span> <input type="checkbox" id="highlight"></label>
+<button id="show-changes" aria-pressed="false">Show changed words</button>
+<div id="changes" hidden></div>
 <div class="foot">
   <div id="count"></div>
   <div id="llm-status"></div>

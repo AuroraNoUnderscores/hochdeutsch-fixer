@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de-CH">
+<meta charset="utf-8">
+<title>Changed words</title>
+<body>
+<p>Der Entscheid ist gefallen. Er war knapp, und das Velo steht auf dem Trottoir.</p>
+<p>Herr Weiss hat im Heiligen-Geist-Spital parkiert. Wir zügeln am Samstag nach Bern.</p>
+<p>Es kostet 1'250'000 Franken, und das macht Spass.</p>
+<pre id="result" style="margin-top:1em"></pre>   <!-- pre: the content script leaves it alone -->
+
+<script>
+  // The popup's list and the page highlights, end to end: the real content
+  // script with the extension API stubbed; "count" messages are what the
+  // background collects for the popup.
+  window.__rankReady = new Promise(r => { window.__setRank = r; });
+  window.__reports = [];
+  const listeners = [];
+  let settings = { mode: 'neutral', llm: true, highlight: false };
+  window.__setHighlight = on => { settings = { ...settings, highlight: on }; listeners.forEach(fn => fn()); };
+  window.browser = {
+    storage: {
+      local: { get: async () => settings, set: async () => {} },
+      onChanged: { addListener: fn => listeners.push(fn) },
+    },
+    runtime: {
+      onMessage: { addListener() {} },
+      sendMessage: async msg => {
+        if (msg?.type === 'rank') return (await window.__rankReady)(msg.jobs);
+        if (msg?.type === 'count') window.__reports.push(msg);
+        return null;
+      },
+    },
+  };
+</script>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../coverage.js"></script>
+<script src="../german_too.js"></script>
+<script src="../engine.js"></script>
+<script src="../content.js"></script>
+<script src="rank.js"></script>
+<script type="module">
+  import { load } from '../llm.js';
+  import { rank } from './ranker.js';
+  const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
+  let fail = 0;
+  const check = (ok, what) => { if (!ok) fail++; log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
+
+  await load();
+  window.__setRank(rank);
+  await new Promise(r => setTimeout(r, 4000));   // rules, then the model pass
+
+  const last = window.__reports.at(-1);
+  const pairs = new Map((last?.changes || []).map(([from, to, n]) => [`${from} → ${to}`, n]));
+  log('reported changes:\n  ' + [...pairs].map(([k, n]) => `${k} ×${n}`).join('\n  '));
+  log('kept as names: ' + JSON.stringify(last?.names));
+  for (const want of ['Der Entscheid → Die Entscheidung', 'Er → Sie', 'Velo → Fahrrad', 'Trottoir → Bürgersteig',
+                      'parkiert → geparkt', 'zügeln → ziehen', 'Bern → Bern um', "1'250'000 → 1.250.000", 'Spass → Spaß'])
+    check(pairs.has(want), `listed: ${want}`);
+  check(![...pairs.keys()].some(k => /Weiss|Spital/.test(k)), 'names are not listed as changes');
+  check((last?.names || []).some(([w]) => w === 'Spital'), 'Spital listed as kept name');
+
+  // highlights: off by default, on when the setting flips
+  const count = name => CSS.highlights.get(name)?.size ?? 0;
+  check(count('hd-changed') === 0, 'no highlights while the setting is off');
+  window.__setHighlight(true);
+  await new Promise(r => setTimeout(r, 200));
+  check(count('hd-changed') === [...pairs.values()].reduce((a, b) => a + b, 0), `one highlight per change (${count('hd-changed')})`);
+  const texts = [...CSS.highlights.get('hd-changed')].map(r => r.toString());
+  check(texts.includes('Fahrrad') && texts.includes('Die Entscheidung') && texts.includes('1.250.000'),
+        `highlights cover the new words: ${texts.join(' | ')}`);
+  check(count('hd-name') >= 1 && [...CSS.highlights.get('hd-name')].some(r => r.toString() === 'Spital'), 'kept name underlined');
+  window.__setHighlight(false);
+  await new Promise(r => setTimeout(r, 200));
+  check(count('hd-changed') === 0 && !document.getElementById('hochdeutsch-fixer-highlight'), 'highlights and style removed when off');
+  log(`\n${fail ? `${fail} FAILED` : 'all passed'}`);
+</script>
+</body>
+</html>

@@ -131,6 +131,11 @@ is ordinary German and stays.
   Abendbrot, Deern, Jung, schnacken, Moin, Tschüss) or *Neutral* (plain German
   Standard German).
 - **Baby LLM**: off = rules only, no download, no model.
+- **Highlight changes on page**: every changed word is tinted, and words the model
+  kept because they are part of a name get a dotted blue underline. Uses CSS
+  highlights, so the page's markup is not touched.
+- **Show changed words**: the list of every change in the tab, all frames
+  included ("Velo → Fahrrad ×4"), and the words kept as names.
 
 ## Adding words
 
@@ -170,6 +175,8 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
 - `dev/e2e.html` — rules + model, 21 cases.
 - `dev/names.html` — names kept, ordinary words still changed, end to end.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
+- `dev/changes.html` — the changed-words list and the highlights, end to end.
+- `dev/popup.html` — the popup with made-up data, to look at it without the extension.
 - `dev/bg.html` — background page: model loading, ranking, caching.
 - `dev/chch.html` — a real page (ch.ch speeding fines) run through the content
   script, printing a before/after diff.

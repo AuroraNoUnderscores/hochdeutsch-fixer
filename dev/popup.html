@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Popup preview</title>
+<script>
+  // The real popup with a stubbed extension API and a made-up tab, to see the
+  // changed-words list and the highlight switch without loading the extension.
+  (async () => {
+    const stub = `<script>
+      const store = { mode: 'hamburg', llm: true, highlight: false };
+      window.browser = {
+        tabs: { query: async () => [{ id: 1 }], sendMessage: async () => ({ host: 'www.ch.ch', count: 14, active: true, mode: 'hamburg', meta: false }) },
+        storage: { local: { get: async () => store, set: async o => Object.assign(store, o) } },
+        runtime: { sendMessage: async m =>
+          m.type === 'llm-status' ? { status: 'ready', decided: 42, log: [{ from: 'Busse', to: 'Buße', margin: 3.1 }] }
+          : m.type === 'tab-count' ? { count: 14, frames: 2, meta: false,
+              changes: [['Velo', 'Fahrrad', 4], ['Strasse', 'Straße', 3], ['Der Entscheid', 'Die Entscheidung', 2], ['Er', 'Sie', 2],
+                        ['parkiert', 'geparkt', 1], ['Bern', 'Bern um', 1], ["1'250'000", '1.250.000', 1]],
+              names: [['Spital', 1], ['Weiss', 1]] }
+          : null },
+      };
+    <\/script><script src="../popup.js"><\/script>`;
+    const html = (await (await fetch('../popup.html')).text()).replace('<script src="popup.js"><\/script>', stub);
+    document.open(); document.write(html); document.close();
+  })();
+</script>
