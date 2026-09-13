@@ -278,6 +278,10 @@
         const form = w.toLowerCase();
         tok.piece = { kind: 'eszett', word: w, at: tok.at, rule: ruleWord, form,
                       cue: decide(t.ssCues.get(form), sentence),
+                      // Mid-sentence, capitalisation fixes the word class, and for
+                      // these words the word class fixes the spelling: "Aß" cannot
+                      // exist. Only at a sentence start is it open.
+                      fixed: !!D.ssCase?.[form] && !atSentenceStart(text, tok.at),
                       options: [...new Set([w, ruleWord])], pick: ruleWord === w ? 0 : 1 };
         continue;
       }
@@ -303,7 +307,7 @@
     if (cased) {
       // A capitalised word mid-sentence is the noun; lowercase is the verb.
       const noun = isUpper(w[0]) && !atSentenceStart(text, tok.at);
-      return noun ? cased.upper : cased.lower;
+      return matchCase(w, noun ? cased.upper : cased.lower);
     }
     const s = fixSS(compounded ?? w);
     // Both spellings in one text means they are being contrasted ("Masse" vs
@@ -689,7 +693,8 @@
       let word = '', from = 0;
       pairs.forEach((i, n) => {
         const prob = probs[k + n];
-        const eszett = unseen ? p.cue === 1
+        const eszett = p.fixed ? ruleEszett[n]
+          : unseen ? p.cue === 1
           : prob == null ? ruleEszett[n]
           : prob > 0.5 + ESZETT_MARGIN() ? true
           : prob < 0.5 - ESZETT_MARGIN() ? false
