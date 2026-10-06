@@ -60,12 +60,18 @@ const cases = [
   ['Der Fluss, das Schloss, der Prozess, muss, dass', 'Der Fluss, das Schloss, der Prozess, muss, dass'],
   ['regelmässig, gemäss, schliesslich, draussen, ausserdem', 'regelmäßig, gemäß, schließlich, draußen, außerdem'],
   ['Der Fussball ist gross. Die Fussel', 'Der Fußball ist groß. Die Fussel'],
-  ['Er sass im Estrich.', 'Er saß im Dachboden.'],
+  ['Er sass im Estrich.', 'Er saß auf dem Dachboden.'],        // German keeps things on the attic
 
   // numbers, greetings, phrases
   ['Das kostet 1\'250\'000 Franken bzw. 3\'499.90 CHF.', 'Das kostet 1.250.000 Franken bzw. 3.499,90 CHF.'],
-  ['Grüezi mitenand!', 'Moin zusammen!'],
-  ['Grüezi, wie geht es?', 'Moin, wie geht es?'],
+  ['Grüezi mitenand!', 'Hallo zusammen!'],                     // Moin is the Hamburg flavour only
+  ['Grüezi, wie geht es?', 'Guten Tag, wie geht es?'],
+  ['Grüezi mitenand!', 'Moin zusammen!', 'hamburg'],
+  ['Grüss Gott, Herr Meier!', 'Grüß Gott, Herr Meier!'],
+  ['Grüss dich!', 'Grüß dich!'],
+  ['Grüss deine Familie von mir!', 'Grüße deine Familie von mir!'],
+  ['Das kostet CHF 12.50 bzw. Fr. 3.– oder 12.50 Franken.', 'Das kostet CHF 12,50 bzw. Fr. 3,– oder 12,50 Franken.'],
+  ['Am 12.05.2024 um 12.30 Uhr', 'Am 12.05.2024 um 12.30 Uhr'],
 
   // ambiguous words settled by the topic, without asking the model (ch.ch)
   ['Wie hoch sind die Bussen für zu schnelles Fahren?', 'Wie hoch sind die Bußen für zu schnelles Fahren?'],
@@ -120,6 +126,70 @@ const cases = [
   ['Ich ass zu viel.', 'Ich aß zu viel.'],
   ['Sie sass auf seinem Schoss.', 'Sie saß auf seinem Schoß.'],
   ['Der Torhüter schoss daneben.', 'Der Torhüter schoss daneben.'],
+
+  // found on real .ch pages (dev/swiss.html)
+  ['Die grosse Offerte kam gestern.', 'Das große Angebot kam gestern.'],       // an ss-adjective broke agreement
+  ['Der grosse Entscheid fiel gestern.', 'Die große Entscheidung fiel gestern.'],
+  ['Diese Dienstleistung kann in der Offerte enthalten sein.', 'Diese Dienstleistung kann im Angebot enthalten sein.'],
+  ['Wir gehen zu der Beiz.', 'Wir gehen zu der Kneipe.'],                    // the writer chose "zu der" over "zur"
+  ['Das berühmte Sasara-Tram kommt.', 'Die berühmte Sasara-Straßenbahn kommt.'],
+  ['Den Töff-Crack kennt jeder.', 'Den Motorrad-Crack kennt jeder.'],        // the last part decides the article
+  ['Welche Eigenschaften braucht eine MaturandIn?', 'Welche Eigenschaften braucht eine MaturandIn?'],
+  ['Die Frau trägt einen kleinen Bub auf dem Arm.', 'Die Frau trägt einen kleinen Jungen auf dem Arm.'],
+  ['zur eidgenössisch anerkannten gymnasialen Maturität', 'zum eidgenössisch anerkannten gymnasialen Abitur'],
+  ['mit einer gut bestandenen Matura', 'mit einem gut bestandenen Abitur'],
+  ['Wir stellen die Kisten in den Estrich.', 'Wir stellen die Kisten auf den Dachboden.'],
+  ['Lauch und Rüebli dazugeben.', 'Lauch und Karotten dazugeben.'],          // no article: plural
+  ['Die Stadt ist sehr velofreundlich.', 'Die Stadt ist sehr fahrradfreundlich.'],
+  ['Das Auto muss hier parkiert werden.', 'Das Auto muss hier geparkt werden.'],
+  ['Er sagt, dass er falsch parkiert hat.', 'Er sagt, dass er falsch geparkt hat.'],
+  ['Er hat das Auto, das rot ist, parkiert.', 'Er hat das Auto, das rot ist, geparkt.'],
+  ['Er ist müde, weil er schlecht parkiert.', 'Er ist müde, weil er schlecht parkt.'],
+  ['Er hat gesagt, er parkiert hier.', 'Er hat gesagt, er parkt hier.'],
+  ['Wegen dem Entscheid ärgert er sich.', 'Wegen der Entscheidung ärgert er sich.'], // "er" is a person
+  ['Der Entscheid fiel und er war knapp.', 'Die Entscheidung fiel und sie war knapp.'],
+  ['Das Hotel ist ruhig gelegen.', 'Das Hotel ist ruhig gelegen.'],          // an adjective: model decides, default kept
+  ['Ich bin pressiert.', 'Ich bin in Eile.'],
+  ['Bist du pressiert?', 'Bist du in Eile?'],
+  ['Es pressiert.', 'Es eilt.'],
+  ['Die Tagesmutter, wo ich kenne, ist nett.', 'Die Tagesmutter, die ich kenne, ist nett.'],
+  ['Er erstellt eine faire Offerte, die Sie überraschen wird.', 'Er erstellt ein faires Angebot, das Sie überraschen wird.'], // "Sie" is the reader
+  ['Wir bauen das Tram- und Busangebot aus.', 'Wir bauen das Straßenbahn- und Busangebot aus.'],
+  ['Falls das soeben gekaufte Billett fehlt', 'Falls die soeben gekaufte Fahrkarte fehlt'],
+  ['mit Verweis auf das Messerstecher-Inserat', 'mit Verweis auf die Messerstecher-Anzeige'],
+  ['Er wurde Vater eines Buben und eines Meitli.', 'Er wurde Vater eines Jungen und eines Mädchens.'],
+  ['Wir erstellen eine auf Sie zugeschnittene Offerte.', 'Wir erstellen ein auf Sie zugeschnittenes Angebot.'],
+  ['Die auf dem Tisch liegende Offerte ist neu.', 'Das auf dem Tisch liegende Angebot ist neu.'],
+  ['Ein Curry kostet 8.90 EUR.', 'Ein Curry kostet 8,90 EUR.'],
+  // words found by measurement on .ch pages
+  ['Gemäss Medienmitteilung wurde der Gemeindepräsident Ende Jahr pensioniert.', 'Gemäß Pressemitteilung wurde der Bürgermeister Ende des Jahres pensioniert.'],
+  ['Die Lehrpersonen der Primarschule treffen sich im Schulzimmer.', 'Die Lehrkräfte der Grundschule treffen sich im Klassenzimmer.'],
+  ['Die Baubewilligung wurde nach einer Einsprache erteilt.', 'Die Baugenehmigung wurde nach einem Einspruch erteilt.'],
+  ['Wir haben eine Reservation für heute.', 'Wir haben eine Reservierung für heute.'],
+  ['Auf 20 Hektaren wachsen Reben.', 'Auf 20 Hektar wachsen Reben.'],
+  ['Resp. die Anmeldung ist bis anhin nicht aufgeschaltet.', 'Bzw. die Anmeldung ist bisher nicht freigeschaltet.'],
+  ['Wir suchen eine Zügelfirma für den Zügeltermin.', 'Wir suchen eine Umzugsfirma für den Umzugstermin.'],
+  ['Die Rahmsauce und die Rahmenbedingungen', 'Die Sahnesauce und die Rahmenbedingungen'],
+  ['Von den Peperoni die Kerne entfernen.', 'Von den Paprika die Kerne entfernen.'],        // no dative -n after a vowel
+  ['Von den scharfen Peperoni die Kerne entfernen.', 'Von den scharfen Peperoni die Kerne entfernen.'], // chili: German too
+  ['Die Storen sind kaputt.', 'Die Jalousien sind kaputt.'],
+  ['Im App Store gibt es den Store nicht.', 'Im App Store gibt es den Store nicht.'],      // a shop unless it says blind
+  ['Die Koffer sind im Estrich verstaut.', 'Die Koffer sind auf dem Dachboden verstaut.'],
+  ['Die Risse im Estrich muss der Estrichleger ausbessern.', 'Die Risse im Estrich muss der Estrichleger ausbessern.'], // screed
+  ['Lade die App im Google Play Store herunter.', 'Lade die App im Google Play Store herunter.'],
+
+  // agreement without an article, and around adverbs
+  ['Antrag und Umschreibung Führerausweises', 'Antrag und Umschreibung Führerscheins'],
+  ['die daraus folgende Limite', 'das daraus folgende Limit'],
+  ['verbindliche Offerte von einem Partner', 'verbindliches Angebot von einem Partner'],
+  ['Grosse Offerte für alle', 'Großes Angebot für alle'],
+  ['Nach zwei Jahren pandemiebedingtem Unterbruch', 'Nach zwei Jahren pandemiebedingter Unterbrechung'],
+  ['Das Rezept für eine mal etwas andere Wähe.', 'Das Rezept für einen mal etwas anderen Blechkuchen.'],
+  ['Wir senden Offerten an alle.', 'Wir senden Angebote an alle.'],
+  ['Mit seinem Übernamen war er bekannt.', 'Mit seinem Spitznamen war er bekannt.'],
+  ['die Beurteilung des Anfangsmietzinses', 'die Beurteilung der Anfangsmiete'],
+  ['Der Neulenker muss vorsichtig fahren.', 'Der Fahranfänger muss vorsichtig fahren.'],
+  ['Für Neulenkerinnen gilt eine Probezeit.', 'Für Fahranfängerinnen gilt eine Probezeit.'],
 
   // Hamburg mode
   ['Ich kaufe zwei Weggli.', 'Ich kaufe zwei Rundstücke.', 'hamburg'],

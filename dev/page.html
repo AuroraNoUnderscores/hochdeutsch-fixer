@@ -13,6 +13,7 @@
 <pre id="f">const velo = "Strasse";</pre>
 <input id="g" value="Mein Velo">
 <p id="h"></p>
+<p id="k">Der Estrich im Neubau muss trocknen. Die Straße ist gesperrt, weil der Fußweg saniert wird. Das heißt: Masse und Gewicht prüfen.</p>
 <div id="result" style="white-space:pre;font-family:monospace"></div>
 
 <script>
@@ -63,6 +64,8 @@
     i: 'Moin Anna, ich habe mein Fahrrad am Bahnhof geparkt. Gruß, Max',
     j: 'The bus leaves at noon. Please bring your ticket and a hat.',
     h: 'Nachgeladen: Die Radfahrer grüßen.',
+    // written in German spelling: its ss and its German words stay
+    k: 'Der Estrich im Neubau muss trocknen. Die Straße ist gesperrt, weil der Fußweg saniert wird. Das heißt: Masse und Gewicht prüfen.',
   };
   await new Promise(r => setTimeout(r, 4000)); // let the model pass finish
   let fail = 0;

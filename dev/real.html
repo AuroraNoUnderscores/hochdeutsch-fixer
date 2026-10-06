@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="de-CH">
+<meta charset="utf-8">
+<title>Notizen aus der Schweiz</title>
+<body style="font:15px/1.5 system-ui;max-width:46em;margin:2em auto">
+<h1>Notizen aus der Schweiz</h1>
+<div id="notes"></div>
+<pre id="result" style="border-top:1px solid #ccc;padding-top:1em"></pre>
+<script src="corpus.js"></script>
+<script>
+  // For the installed extension (nothing here is stubbed): the 44 notes of the
+  // answer key as ordinary paragraphs, graded once the extension has had time.
+  // Hamburg flavour (the default) is what the key expects; ?wait=20 seconds.
+  const notes = document.getElementById('notes');
+  for (const [swiss] of HD_CORPUS) notes.append(Object.assign(document.createElement('p'), { textContent: swiss }));
+  const wait = +(new URLSearchParams(location.search).get('wait') || 20);
+  setTimeout(() => {
+    const got = [...notes.children].map(p => p.textContent);
+    const wrong = got.map((g, i) => [g, HD_CORPUS[i]]).filter(([g, [, want, alt]]) => g !== want && g !== alt);
+    const untouched = got.filter((g, i) => g === HD_CORPUS[i][0] && HD_CORPUS[i][1] !== g).length;
+    document.getElementById('result').textContent =
+      `${got.length - wrong.length}/${got.length} match the answer key` +
+      (untouched ? ` (${untouched} notes the extension did not change at all)` : '') + '\n\n' +
+      wrong.map(([g, [, want]]) => `want: ${want}\ngot:  ${g}`).join('\n\n');
+    document.title = `graded ${got.length - wrong.length}/${got.length}`;
+  }, wait * 1000);
+</script>
+</body>
+</html>

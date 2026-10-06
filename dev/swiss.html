@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Real Swiss sentences</title>
+<body style="white-space:pre-wrap;font-family:monospace;font-size:12px"></body>
+<script type="module">
+  // The whole engine on real sentences from .ch pages that contain a dictionary
+  // word (training/names_extract.py writes them), printed before and after, for
+  // reading. There is no answer key for real Swiss text, so nothing is graded.
+  //   ?n=200 sentences   ?seed=1 which sample   ?llm=0 rules only   ?mode=hamburg
+  //   ?file=v31/ch.jsonl another sentence file in training/data/names/
+  //   ?base=old          load the engine from dev/old/ (e.g. `git show HEAD:…`
+  //                      files) to compare two versions on the same sample
+  const q = new URLSearchParams(location.search);
+  const n = +(q.get('n') || 200), useLlm = q.get('llm') !== '0', mode = q.get('mode') || 'neutral';
+  const base = q.get('base') ? `./${q.get('base')}/` : '../';
+  for (const f of ['dictionary.js', 'morph.js', 'coverage.js', 'german_too.js', 'engine.js', 'dev/rank.js'])
+    await new Promise((ok, fail) => document.head.append(Object.assign(document.createElement('script'),
+      { src: f.startsWith('dev/') ? f.slice(4) : base + f, onload: ok, onerror: fail })));
+  const { load } = await import('../llm.js');
+  const { rank } = await import('./ranker.js');
+  const E = globalThis.HD_ENGINE;
+  let seed = +(q.get('seed') || 1);
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const log = s => document.body.insertAdjacentText('beforeend', s + '\n');
+
+  const file = q.get('file') || 'ch.jsonl';
+  const rows = (await (await fetch(`../training/data/names/${file}`)).text()).split('\n').filter(Boolean).map(JSON.parse);
+  const sample = [];
+  const seen = new Set();
+  while (sample.length < n && seen.size < rows.length) {
+    const r = rows[Math.floor(rand() * rows.length)];
+    if (seen.has(r.sentence)) continue;
+    seen.add(r.sentence);
+    sample.push(r);
+  }
+  if (useLlm) await load();
+  window.__out = [];
+  for (const [k, r] of sample.entries()) {
+    if (k % 10 === 0) { document.title = `${k}/${sample.length}`; await new Promise(res => setTimeout(res, 0)); }
+    const c = E.convert(r.sentence, { mode });
+    if (useLlm) await E.resolve(c.pieces, rank);
+    const out = E.renderPieces(c.pieces);
+    window.__out.push({ in: r.sentence, out, key: r.key });
+    log(`#${k} [${r.key}]\n- ${r.sentence}\n+ ${out}\n`);
+  }
+  document.title = 'done';
+</script>

@@ -71,6 +71,27 @@ words those are was measured on a web crawl (`german_too.js`: about as common on
 German puts verbs, the original stays a candidate and the general model keeps it
 when it reads clearly better.
 
+That works where the two readings *sound* different ("am Rande der Stadt"), but
+not where only the meaning differs: on 124 hand-labelled sentences
+(`training/data/german_too_labels.json`) the model's margins did not separate
+Estrich the attic from Estrich the screed, a Pult as desk from one as mixing
+desk, or Peperoni the bell pepper from Peperoni the chili. For those words topic
+cues decide (`cues` in `dictionary.js`: "Risse", "Beton" → screed; "Keller",
+"Stauraum" → attic), which took them from 44 to 49 of 61 right on .ch sentences.
+"Store" is a shop on .ch pages 6 times in 7 (App Store, Music Store), so it only
+becomes a blind when its sentence says so; "Parking" was never the Swiss
+"Parkhaus" in the sample (brands and English), so it is no longer in the dictionary.
+
+### Text already in German spelling is German
+
+Swiss spelling has no ß. A page whose text uses ß where the rules would expect it
+(at least three, and more than three times as many as Swiss ss spellings), or a
+block with two or more, was written in Germany or Austria: its ss are the
+writer's own choice, so the eszett model is not asked, and a word German also
+uses ("Estrich", "Kübel", "Peperoni") keeps its German meaning. Everything else,
+including the Hamburg flavour, still applies. The check reads the page as the site
+wrote it, never the ß this extension wrote into it.
+
 ### Text about words is left alone
 
 A page explaining that "Mass (1) und Masse (2) werden in der Mehrzahl zu Massen"
@@ -79,8 +100,12 @@ catch this — both spellings read perfectly naturally — so it is detected ins
 at three levels, each reverting anything already changed:
 
 - **Page**: a strong cue (Rechtschreibung, Eszett, Duden, Grammatik, Helvetismus …)
-  or two weaker ones in the title and text switch the extension off for the page.
-  The popup then says so.
+  with any other cue beside it, or three clear cues (das Wort, Mehrzahl, sagt man …),
+  in the title and text switch the extension off for the page. The popup then
+  says so. Common words like "bedeutet" and "Bedeutung" count only beside a clear
+  cue: on their own they switched off 1.7% of ordinary .ch pages (news, shops,
+  blogs); now 0.17%, mostly grammar tests and language schools.
+- **Block**: a strong cue, two clear cues, or one with a weak cue beside it.
 - **Sentence**: one cue (das Wort, Mehrzahl, sagt man, Aussprache …) suppresses
   that sentence only, so a single explaining line in an ordinary article is safe.
 - **Word**: a word in quotes («Velo»), or inside `em`/`i`/`q`/`cite`/`dfn` with
@@ -92,8 +117,14 @@ at three levels, each reverting anything already changed:
 It ranks candidates by how natural they sound, and may only overrule a rule when
 clearly better, by a margin in nats that depends on what is at stake (`CONF` in
 `engine.js`): word choice 2.0, forms 0.5, grammar wording 0. Below that the rule's
-default stands. The popup lists recent decisions with their margins, and "Baby
-LLM" off turns both models off (rules only).
+default stands. Two grammar choices have measured margins of their own:
+existential "es hat" → "es gibt" needs 5 (true existentials scored 5.7 and more,
+"Das Kind ist müde. Es hat Hunger." mostly under 5 once the sentence before is in
+view), and "ist … gelegen" → "hat … gelegen" needs 1 ("Das Hotel ist ruhig
+gelegen" is German and scored up to 0.9). The popup lists recent decisions with
+their margins, and "Baby LLM" off turns both models off (rules only). If the
+general model cannot download, the bundled eszett model still decides ss/ß and
+names.
 
 ### Swiss grammar, not just words
 
@@ -105,10 +136,19 @@ Some Helvetisms are constructions rather than vocabulary:
 | Der Kollege, wo mir hilft | Der Kollege, der mir hilft | gender from the article, model picks the case |
 | Ich bin gesessen / Er ist gestanden | Ich habe gesessen / Er hat gestanden | rules: position verbs take haben |
 
-"es hat" only becomes "es gibt" where *es* is the subject and the clause holds no
-participle, so "Es hat geregnet", "Sie hat es eilig" and "Er hat es mir gegeben"
-are left alone. Relative "wo" after a place or a time ("die Stadt, wo ich wohne")
-is ordinary German and stays.
+"es hat" only becomes "es gibt" where *es* is the subject ("es hat", "hat es …?",
+"Im Kühlschrank hat es …") and the clause holds no participle, so "Es hat
+geregnet", "Sie hat es eilig" and "Er hat es mir gegeben" are left alone; the
+model then decides, with the sentence before in view, whether *es* is a thing
+("Das Haus ist alt. Es hat einen Garten."). "gelegen" is also an adjective, so
+"Das Hotel ist ruhig gelegen" and "Mir ist viel daran gelegen" stay. Relative
+"wo" after a place or a time ("die Stadt, wo ich wohne") is ordinary German and
+stays; the last part of a compound decides ("Wohnort" is a place, "Tagesmutter"
+is not).
+
+Also rewritten: prices with a decimal point ("CHF 12.50" → "CHF 12,50"), and a
+preposition before a changed article where German contracts it ("in der Offerte"
+→ "im Angebot"), unless the writer chose not to ("zu der Beiz" stays apart).
 
 ### What each side decides
 
@@ -118,18 +158,18 @@ is ordinary German and stays.
 | Articles, adjective endings, case and number after a gender change | rules, model picks when the case is ambiguous ("ein Keks" vs "einen Keks") | |
 | every ss/ß | eszett model, rules where it is unsure | measured 5× fewer errors than rules on unseen text |
 | Is a changed word part of a name? | eszett model | a name is a fact about the text, not the word |
-| Dictionary words that are also German (Rande, Store, Estrich) | general model may keep the original | measured on a crawl which words these are |
+| Dictionary words that are also German (Rande, Store, Estrich) | topic cues, else the general model may keep the original; kept outright in text written in German spelling | measured on a crawl which words these are, and that the model cannot tell their senses apart |
 | Words that are also German with another meaning (Busse, Finken, tönen) | cue words in the surrounding block, else the model | the model only judges how a sentence sounds and cannot know a page is about speeding fines |
 | "zügeln" → "umziehen", incl. moving the particle to the clause end | model | word order |
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
-| Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea |
+| Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea. Never in the noun's own clause ("Wegen dem Entscheid ärgert er sich" is a person), never the polite "Sie" |
 
 ## Settings (toolbar popup)
 
 - **Enabled**, and a per-site switch. Turning it off restores the page without a reload.
 - **Flavour**: *Hamburg* (default — Rundstück, Sonnabend, Schlachter, Tischler,
   Abendbrot, Deern, Jung, schnacken, Moin, Tschüss) or *Neutral* (plain German
-  Standard German).
+  Standard German: "Grüezi" is "Guten Tag", "Grüezi mitenand" "Hallo zusammen").
 - **Baby LLM**: off = rules only, no download, no model.
 - **Highlight changes on page**: every changed word is tinted, and words the model
   kept because they are part of a name get a dotted blue underline. Uses CSS
@@ -144,13 +184,26 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
 - Nouns: `'Swiss/gender/plural = German/gender/plural | flags'`. Gender `m/f/n`,
   or `p` for plural-only; plural `-` means uncountable. Flags: `s` (also matches
   at the end of a compound), `sw`/`gw` (weak masculine), `gen=Form`, `x=regex`
-  (compound exceptions). Genders matter: they drive the article rewriting.
+  (compound exceptions), `auf` (German says "auf" where Swiss says "in": "im
+  Estrich" → "auf dem Dachboden"), `inv` (no dative -n: "auf 20 Hektar").
+  Genders matter: they drive the article rewriting.
+- Finding words worth adding: count on which pages of a web crawl a word occurs,
+  .ch against .de. About 130 words were added that way (Medienmitteilung on 1135
+  of 164k .ch pages and 89 of 1.96M .de pages, Lehrperson, Reservation,
+  Bewilligung, Gemeindepräsident, "resp.", "Ende Jahr" …), and about 100 more in
+  October 2026 (Neulenker, Altersjahr, Überbauung, Kostengutsprache, "zuhanden" …:
+  .ch-heavy words not yet in the dictionary, read through by hand, since most of
+  them are place and family names). After adding words,
+  rerun `training/names_extract.py` and `training/german_too.py`: the crawl
+  decides which new words are German too (it caught "Konfi", which on .de pages
+  is confirmation class, and "Aktuar", an actuary).
 - Everything else: `'swiss,forms>german,forms'` in `words`, `ambiguous` for
   words the model should judge, `phrases` for multi-word ones.
 - `cues`: words that decide an ambiguous *vocabulary* case (Finken, Kasten,
-  tönen) before the general model is asked. `pro` picks the German replacement,
-  `contra` keeps the original — regexes matched against the sentence first, then
-  the text node, then the block around it.
+  tönen, and nouns German also uses: Estrich, Pult, Store, Kübel, Peperoni)
+  before the general model is asked. Keys are word forms. `pro` picks the German
+  replacement, `contra` keeps the original — regexes matched against the sentence
+  first, then the text node, then the block around it.
 - `ssCues`: the same for ss-words with two real spellings (Busse/Buße,
   Masse/Maße). These are the rules' fallback: the eszett model decides, and a cue
   only outranks it for a spelling it barely saw in training, per `coverage.js`
@@ -159,9 +212,18 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
 
 ## Tests
 
-Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
+Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`; the
+browser may cache scripts between edits, so reload hard):
 
-- `test.html` — rules only, no model, 95 cases.
+- `test.html` — rules only, no model, 160 cases.
+- `dev/real.html` — for the *installed* extension, nothing stubbed: the 44 notes
+  of the answer key as a plain page, graded after 20 s (`?wait=`). The Firefox
+  build, installed into a fresh Firefox-engine profile, scores 42/44 there, the
+  same as `dev/key.html`.
+- `dev/swiss.html` — the engine on real sentences from .ch pages
+  (`training/data/names/ch.jsonl`), before and after, for reading; `?base=old`
+  runs another copy of the engine from `dev/old/` on the same sample, to compare
+  versions.
 - `dev/margins.html` — how confident the general model is on every decision.
 - `dev/heldout.html?llm=1` — the whole engine on held-out Wikipedia sentences
   (`training/data`), with errors split by whether the model or the rules decided.
@@ -202,9 +264,21 @@ Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`):
   as German (common German words, umlauts). Short fragments on pages with no
   German around them are left alone.
 - Pronoun agreement is only fixed when nothing else could be the antecedent: it
-  stops at the next noun, and in a following sentence only a pronoun that opens
-  that sentence counts, so "… auf dem Trottoir. Weil es so heiss war" keeps its
-  weather-"es".
+  stops at the next noun, a pronoun in the noun's own clause is left alone, and
+  in a following sentence only a pronoun that opens that sentence counts, so
+  "… auf dem Trottoir. Weil es so heiss war" keeps its weather-"es".
+- Articles follow a changed noun across adverbs ("der eidgenössisch anerkannten
+  Maturität"), hyphenated compounds ("das Sasara-Tram") and phrases with a
+  preposition inside ("eine auf Sie zugeschnittene Offerte", "das daraus folgende
+  Limit"), but not across anything longer. Without an article, adjectives that
+  agree with the noun are re-inflected ("verbindliche Offerte" → "verbindliches
+  Angebot"), and the model may keep them as they were; a noun whose own form shows
+  the genitive keeps it ("Umschreibung Führerausweises" → "Führerscheins").
+- Split text: an article and its noun in different text nodes ("die
+  <a>Offerte</a>") are converted separately, so the article stays.
+- Vocabulary is a list. On 300 random .ch sentences containing a dictionary word,
+  the remaining misses were mostly names the model did not recognise (a café
+  called "Kafi Franz", "STAR Coiffeur") and Swiss words not in the list.
 - Capitalisation settles some ss/ß pairs by itself, with no model call: a noun is
   capitalised and a past tense is not, so mid-sentence "Ass" stays an ace while
   "ass" becomes "aß", and "Schoss" becomes "Schoß" while "schoss" stays.

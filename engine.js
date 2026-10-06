@@ -12,21 +12,34 @@
   // overrule the rules' default. A wrong spelling or word choice is the most
   // visible kind of mistake, so those demand real confidence; for grammar the
   // rules already decided what to do and the model only picks the wording.
-  const CONF = { spelling: 2, word: 2, form: 0.5, grammar: 0 };
+  // Two grammar choices got measured thresholds of their own (e2e on hand-made
+  // sets, the previous sentence in view): existential "es hat" -> "es gibt" had
+  // margins of 5.7 and more where it is existential, under 5 for 7 of 9 where
+  // "es" is a thing ("Das Kind ist müde. Es hat Hunger."); swapping "ist ...
+  // gelegen" to "hat" needs 1, as the adjective ("ruhig gelegen") scored up to 0.9.
+  const CONF = { spelling: 2, word: 2, form: 0.5, grammar: 0, existential: 5, position: 1 };
   const AUX = /(?:^|[^\p{L}])(?:hat|habe|hast|haben|habt|hatte|hattest|hatten|hattet|hätte|hätten|ist|bin|bist|sind|seid|war|warst|waren|wart|wäre|wären|wird|wirst|werden|werdet|wurde|wurden|worden|gewesen)(?![\p{L}])/iu;
+  const SEIN = /(?<![\p{L}])(?:bin|bist|ist|sind|seid|war|warst|waren|wart|sei|seien|wäre|wären|sein|gewesen)(?![\p{L}])/iu;
+  const SUBORDINATE = /^\s*(?:weil|dass|ob|wenn|als|da|obwohl|damit|bevor|nachdem|sobald|während|falls|sofern|indem|wer|was|wo|wie|welche[rsnm]?)(?![\p{L}])/iu;
+  const AUX_AFTER = /^\s+(?:werden|wird|wurde|wurden|worden|sein|ist|sind|war|waren|wäre|wären|gewesen|habe|hast|hat|haben|habt|hatte|hatten|hätte|hätten)(?![\p{L}])/iu;
   const VERB_END = /^(?:en|e|st|t|et|te|ten|ter|tes|tem|test|tet|end|ende|enden|ender|endes|endem)$/;
   const NEXT_IS_NOUN = /^\s+\p{Lu}/u;
   const THOUSANDS = /(?<!\d)(\d{1,3}(?:['’]\d{3})+)(\.\d{1,2}(?!\d))?/g;
+  const PRICE = /((?:CHF|SFr\.|Fr\.|EUR|€)\s?)(\d+)\.(\d{2}|[–-]{1,2})(?![\d])|(?<![\d.,'’])(\d+)\.(\d{2}|[–-]{1,2})(?=\s?(?:CHF|SFr\.|Fr\.|Franken|EUR|Euro|€)(?![\p{L}]))/gu;
   const INTENSIFIERS = new Set('sehr ganz besonders ziemlich recht echt total extrem relativ so noch zu'.split(' '));
   const NON_ADJ = new Set('haben werden wollen können müssen sollen dürfen mögen lassen geben sehen gehen kommen oder aber immer wieder unter über hinter wegen gegen neben seine meine deine'.split(' '));
   // "Es regnet" is not about anything, so it keeps its "es".
   const IMPERSONAL = new Set('regnet regnete schneit schneite hagelt donnert blitzt dämmert gibt gab geht ging handelt lohnt reicht heisst heißt droht drohte drohen folgt folgte gilt galt braucht'.split(' '));
+  // Capitalised mid-sentence, these address the reader: "eine Offerte, die Sie überrascht".
+  const POLITE = new Set('Sie Ihnen Ihr Ihre Ihren Ihrem Ihrer Ihres'.split(' '));
+  const SETTINGS = new Set('hier dort da heute morgen gestern jetzt nun noch immer draussen draußen drinnen überall oben unten hinten vorne leider zurzeit momentan aktuell'.split(' '));
+  const CONJUNCTIONS = new Set('und oder aber denn sondern doch weil dass da als wenn ob obwohl nachdem bevor sobald während damit falls'.split(' '));
   const INDEF = /^(?:ein|eine|einen|einem|einer|eines|kein|keine|keinen|keinem|keiner|keines)$/i;
   const NUMERALS = new Set('zwei drei vier fünf sechs sieben acht neun zehn elf zwölf viele mehrere einige beide alle wenige zahlreiche'.split(' '));
 
   // Cues must start a word (and the others end one too): as bare substrings
   // "Silbe" matched "Silbernes" and "bedeutet" matched "bedeutete".
-  const META_STRONG = new RegExp('(?<!\\p{L})(?:' + D.meta.strong + ')', 'iu');
+  const META_STRONG = new RegExp('(?<!\\p{L})(?:' + D.meta.strong + ')', 'giu');
   const META_SENTENCE = new RegExp('(?<!\\p{L})(?:' + D.meta.sentence + ')(?!\\p{L})', 'giu');
   const META_WEAK = new RegExp('(?<!\\p{L})(?:' + D.meta.weak + ')(?!\\p{L})', 'giu');
   const OPEN_QUOTE = /[«„“‚‹"'»]\s*$/;
@@ -34,15 +47,19 @@
 
   const distinct = (text, re) => new Set((text.match(re) || []).map(m => m.toLowerCase()));
 
-  // Is this text talking about words rather than using them? A strong cue always
-  // counts. A single sentence needs one unmistakable cue ("in der Mehrzahl zu
-  // Massen"); a page or block needs two cues of any kind.
-  function isMeta(text, sentence) {
+  // Is this text talking about words rather than using them? A sentence needs one
+  // unmistakable cue ("in der Mehrzahl zu Massen"); a block a strong cue, two
+  // clear ones, or one with a weak cue beside it; a whole page a strong cue with
+  // any other beside it, or three clear ones. Weak cues alone never count:
+  // "bedeutet" and "Bedeutung" in the first 6000 characters switched off 1.7% of
+  // ordinary .ch pages (news, shops, blogs), and "Duden" alone a law firm's page.
+  function isMeta(text, level = 'block') {
     if (!text) return false;
-    if (META_STRONG.test(text)) return true;
-    const clear = distinct(text, META_SENTENCE);
-    if (sentence) return clear.size >= 1;
-    return clear.size + distinct(text, META_WEAK).size >= 2;
+    const strong = distinct(text, META_STRONG).size, clear = distinct(text, META_SENTENCE).size;
+    if (level === 'sentence') return strong + clear >= 1;
+    const weak = distinct(text, META_WEAK).size;
+    if (level === 'page') return clear >= 3 || (strong >= 1 && strong + clear + weak >= 2);
+    return strong >= 1 || clear >= 2 || (clear >= 1 && weak >= 1);
   }
 
   // Per-sentence verdicts for one text, so one explaining sentence in an
@@ -52,10 +69,10 @@
     const re = /[.!?]+(?:\s|$)/g;
     let start = 0, m;
     while ((m = re.exec(text))) {
-      spans.push({ end: re.lastIndex, meta: isMeta(text.slice(start, re.lastIndex), true) });
+      spans.push({ end: re.lastIndex, meta: isMeta(text.slice(start, re.lastIndex), 'sentence') });
       start = re.lastIndex;
     }
-    if (start < text.length) spans.push({ end: text.length, meta: isMeta(text.slice(start), true) });
+    if (start < text.length) spans.push({ end: text.length, meta: isMeta(text.slice(start), 'sentence') });
     return spans;
   }
 
@@ -84,7 +101,7 @@
       sPl: sG === 'p' ? [sLemma] : sPl === '-' ? [] : sPl.split(','),
       gLemma: gParts[gParts.length - 1], gWords: gParts.slice(0, -1), gG,
       gPl: gG === 'p' ? gParts[gParts.length - 1] : gPl === '-' ? null : gPl,
-      sWeak: flags.includes('sw'), gWeak: flags.includes('gw'), gGen: val('gen'),
+      sWeak: flags.includes('sw'), gWeak: flags.includes('gw'), gGen: val('gen'), inAuf: flags.includes('auf'), gInv: flags.includes('inv'),
       suffix: flags.includes('s'), except: val('x') && new RegExp(val('x')),
     };
   }
@@ -130,7 +147,8 @@
     const phrases = [...(H.phrases || []), ...D.phrases]
       .flatMap(line => { const [l, r] = line.split('>'); return l.split(',').map(k => [k, r]); })
       .sort((a, b) => b[0].length - a[0].length);
-    t.phraseMap = new Map(phrases);
+    t.phraseMap = new Map();   // the Hamburg layer comes first and wins
+    for (const [k, v] of phrases) if (!t.phraseMap.has(k)) t.phraseMap.set(k, v);
     t.phraseRe = phrases.length && new RegExp(`(?<!\\p{L})(?:${phrases.map(([k]) => escapeRe(k)).join('|')})(?!\\p{L})`, 'gu');
     for (const line of D.ambiguous) { const [k, v] = line.split('>'); t.amb.set(k, v); }
     t.cues = new Map();
@@ -172,9 +190,11 @@
     return null;
   }
 
-  // "parkiert" is "parkt" or "geparkt", decided by the auxiliary earlier in the
-  // sentence or an adjective before a noun. This stays a rule: the model scores
-  // "Er geparkt das Auto" above "Er parkt das Auto", so asking it makes it worse.
+  // "parkiert" is "parkt" or "geparkt", decided by an auxiliary in its clause
+  // ("hat … parkiert", "dass er parkiert hat", "muss parkiert werden"), one earlier
+  // in the sentence when the verb closes its clause ("hat das Auto, das rot ist,
+  // parkiert"), or a noun after it for an adjective. This stays a rule: the model
+  // scores "Er geparkt das Auto" above "Er parkt das Auto", so asking it makes it worse.
   function verb(t, w, before, after) {
     const lower = w.toLowerCase();
     for (const [stem, repl, ge] of t.verbs) {
@@ -185,7 +205,12 @@
       if (!ge) return plain;
       if (/^t(er|es|em)$/.test(end)) return part;           // only ever an adjective
       if (end !== 't' && end !== 'te' && end !== 'ten') return plain;
-      return (end === 't' ? AUX.test(before) : NEXT_IS_NOUN.test(after)) ? part : plain;
+      if (end !== 't') return NEXT_IS_NOUN.test(after) ? part : plain;
+      const clause = before.slice(before.search(/[^,;:]*$/));
+      // an earlier auxiliary only reaches a verb that closes a clause of its own
+      // ("…, das rot ist, parkiert."), not one closing "weil er schlecht parkiert."
+      const closes = /^\s*(?:[.,;:!?)"»“]|$)/.test(after) && !SUBORDINATE.test(clause);
+      return AUX_AFTER.test(after) || AUX.test(clause) || (closes && AUX.test(before)) ? part : plain;
     }
   }
 
@@ -195,7 +220,9 @@
       const n = c.head.length;
       if (w.length - n < 3 || !lower.startsWith(c.head) || isUpper(w[n])) continue;
       if (c.ex && c.ex.test(lower)) continue;
-      return matchCase(w.slice(0, n), c.repl) + w.slice(n);
+      // "velofreundlich" stays an adjective: "fahrradfreundlich", not "Fahrradfreundlich"
+      const repl = isUpper(w[0]) ? c.repl : c.repl[0].toLowerCase() + c.repl.slice(1);
+      return matchCase(w.slice(0, n), repl) + w.slice(n);
     }
   }
 
@@ -230,7 +257,7 @@
   const quoted = (tokens, i) =>
     OPEN_QUOTE.test(tokens[i - 1]?.s || '') && CLOSE_QUOTE.test(tokens[i + 1]?.s || '');
 
-  function wordPass(t, text, tokens, context) {
+  function wordPass(t, text, tokens, { context, german }) {
     const haystack = (context ? context + ' ' : '') + text;
     // Cues are judged on the sentence first, then the whole text, then the block
     // around it. A long note holds several sentences and "Koffer" in one of them
@@ -253,11 +280,20 @@
       const sentence = text.slice(span ? spans[span - 1].end : 0, spans[span]?.end ?? text.length);
       const w = tok.w;
       const noun = findNoun(t, w);
-      if (noun) { tok.noun = noun; continue; }
-      const hit = lookup(t, w);
-      if (hit !== undefined) { tok.s = matchCase(w, hit); nameable(tok); continue; }
+      if (noun) {
+        tok.noun = noun;
+        // a word German also uses, with a topic that settles its sense ("Risse im
+        // Estrich" is screed, "Kisten auf dem Estrich" an attic)
+        tok.cue = decide(t.cues.get(w.toLowerCase()), sentence);
+        continue;
+      }
       const end = tok.at + w.length;
       const start = Math.max(text.lastIndexOf('.', tok.at), text.lastIndexOf('!', tok.at), text.lastIndexOf('?', tok.at)) + 1;
+      // "Ich bin pressiert" is "in Eile", "Es pressiert" is "Es eilt".
+      const pred = D.predicative?.[w];
+      if (pred && SEIN.test(text.slice(start, tok.at).split(/[,;:]/).pop())) { tok.s = pred; continue; }
+      const hit = lookup(t, w);
+      if (hit !== undefined) { tok.s = matchCase(w, hit); nameable(tok); continue; }
       const v = verb(t, w, text.slice(start, tok.at), text.slice(end, end + 40));
       if (v !== undefined) { if (typeof v === 'string') tok.s = v; else tok.piece = v; continue; }
       if (t.amb.has(w)) {
@@ -269,11 +305,12 @@
       const lower = w.toLowerCase();
       if (D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { tok.zuegeln = true; continue; }
       const compounded = compound(t, w);
-      const rule = ssRule(t, w, compounded, tok, text, haystack, sentence, decide);
+      // Text that already spells ß chose every ss itself.
+      const rule = german ? compounded : ssRule(t, w, compounded, tok, text, haystack, sentence, decide);
       // Every "ss" goes to the fine-tuned model (training/), which decides them
       // from context; the rules' answer is shown first and stands wherever the
       // model is off, unsure, or the word was rebuilt from a Swiss compound.
-      if (compounded == null && !allCaps(w) && /ss/.test(w) && !contrasted(haystack, w, w.replace(/ss/g, 'ß'))) {
+      if (!german && compounded == null && !allCaps(w) && /ss/.test(w) && !contrasted(haystack, w, w.replace(/ss/g, 'ß'))) {
         const ruleWord = typeof rule === 'string' ? rule : w;
         const form = w.toLowerCase();
         tok.piece = { kind: 'eszett', word: w, at: tok.at, rule: ruleWord, form,
@@ -359,58 +396,139 @@
   // from a web crawl (training/german_too.py).
   const GERMAN_TOO = new Set(root.HD_GERMAN_TOO || []);
 
-  function npPass(tokens, text) {
+  // An uninflected word between an article and its adjectives: "der eidgenössisch
+  // anerkannten Maturität", "einer gut bestandenen Matura".
+  const ADVERB_END = /(?:isch|lich|ig|bar|sam|haft|los|voll)$/;
+  const ADVERBS = new Set(('gut neu frisch schön fein hoch tief lang kurz stark leicht schwer halb bereits schon bisher speziell extra eigens gross groß ' +
+    'soeben eben gerade kürzlich jüngst erst zuletzt zuvor vorher damals gestern heute jetzt nun einst längst mal etwas').split(' '));
+  // "die daraus folgende Limite", "das dafür nötige Billett"
+  const PRONOMINAL = /^(?:da|dar|hier|wo)(?:an|auf|aus|bei|durch|für|gegen|hinter|in|mit|nach|neben|über|um|unter|von|vor|zu|zwischen)$/;
+  const isAdverb = s => !isUpper(s[0]) && !M.PREP[s] && (INTENSIFIERS.has(s) || ADVERBS.has(s) || ADVERB_END.test(s) || PRONOMINAL.test(s));
+
+  // "eine auf Sie zugeschnittene Offerte", "das auf dem Tisch liegende Billett":
+  // an article, a phrase with a preposition in it, then the adjectives. Taken only
+  // when article, adjectives and noun agree, so "dem" inside "auf dem Tisch" is not.
+  function farDet(tokens, from, e, adjs, noun) {
+    let words = 0, sawPrep = false;
+    for (let x = from - 1; x >= 0 && words < 8; x--) {
+      const tk = tokens[x];
+      if (!tk.w) { if (/[.,;:!?()«»"„“”]/.test(tk.s)) return null; continue; }
+      if (tk.noun || tk.skip || (tk.piece && tk.piece.kind !== 'eszett')) return null;
+      words++;
+      const d = tk.piece ? null : M.parseDet(tk.s);
+      if (d && !d.prep && sawPrep && M.rewrite(e, { det: d, prep: null, adjs, noun: noun.noun, prefix: noun.prefix }).length)
+        return { det: d, at: x };
+      if (M.PREP[tk.s.toLowerCase()] || d?.prep) sawPrep = true;
+    }
+    return null;
+  }
+
+  // A word inside a noun phrase that is rewritten as a whole. An adjective there
+  // may hold an ss the eszett model would otherwise decide ("die grosse
+  // Offerte"); inside the phrase its spelling comes from the rules.
+  const inPhrase = tk => free(tk) || (tk && tk.piece?.kind === 'eszett' && !tk.skip);
+  const ruleSS = tk => tk.piece?.kind === 'eszett' ? tk.piece.rule : tk.s;
+
+  function npPass(tokens, text, opts) {
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       if (!tok.noun || tok.skip) continue;
       const { e } = tok.noun;
-      let det = null, detIdx = -1, adjs = [], adjIdx = [], k = i;
-      while (isSpace(tokens[k - 1]) && free(tokens[k - 2])) {
+      // A topic cue settles a word German also uses; without one the general
+      // model may keep the original. The model judges only how a sentence
+      // sounds, and on hand-labelled .ch sentences its margins did not separate
+      // Estrich the attic from Estrich the screed, nor the two kinds of Peperoni.
+      const alsoGerman = tok.cue !== 1 && (GERMAN_TOO.has(e.sLemma) || GERMAN_TOO.has(tok.w));
+      // Text in German spelling (ß) is German, so a word German also uses is meant as German.
+      if ((alsoGerman && opts.german) || tok.cue === 0) { tok.noun = null; continue; }
+      // "das Sasara-Tram", "die Werbe-Trams": the article agrees with the last part.
+      let head = i;
+      while (tokens[head - 1]?.s === '-' && inPhrase(tokens[head - 2])) head -= 2;
+      // "der Töff-Crack", "das Tram- und Busangebot": a first part only changes its
+      // word, the article belongs to the last.
+      const dash = tokens[i + 1]?.w ? '' : tokens[i + 1]?.s ?? '';
+      const modifier = dash === '-' ? !!tokens[i + 2]?.w : /^-\s/.test(dash);
+      let det = null, detIdx = -1, adjs = [], adjIdx = [], k = head, adverbs = 0;
+      while (!modifier && isSpace(tokens[k - 1]) && inPhrase(tokens[k - 2])) {
         const s = tokens[k - 2].s;
-        const d = M.parseDet(s);
+        const d = tokens[k - 2].piece ? null : M.parseDet(s);
         if (d) { det = d; detIdx = k - 2; break; }
-        if (INTENSIFIERS.has(s) && adjs.length) { k -= 2; continue; }
-        if (!isUpper(s[0]) && !NON_ADJ.has(s) && M.splitAdj(s)) { adjs.unshift(s); adjIdx.unshift(k - 2); k -= 2; continue; }
+        if (adjs.length && adverbs < 2 && isAdverb(s)) { adverbs++; k -= 2; continue; }
+        // capitalised only where it opens a sentence ("Grosse Offerte für alle")
+        const a = isUpper(s[0]) && atSentenceStart(text, tokens[k - 2].at) ? s.toLowerCase() : s;
+        if (!isUpper(a[0]) && !NON_ADJ.has(a) && M.splitAdj(a)) { adjs.unshift(a); adjIdx.unshift(k - 2); adverbs = 0; k -= 2; continue; }
         break;
       }
-      const first = det ? detIdx : adjs.length ? adjIdx[0] : i;
+      if (!det && adjs.length) {
+        const far = farDet(tokens, adjIdx[0], e, adjs, tok.noun);
+        if (far) { det = far.det; detIdx = far.at; }
+      }
+      const first = det ? detIdx : adjs.length ? adjIdx[0] : head;
       let prep = det?.prep ?? null;
-      if (!prep && isSpace(tokens[first - 1]) && tokens[first - 2]?.w && M.PREP[tokens[first - 2].s.toLowerCase()])
+      if (!prep && isSpace(tokens[first - 1]) && free(tokens[first - 2]) && M.PREP[tokens[first - 2].s.toLowerCase()])
         prep = tokens[first - 2].s.toLowerCase();
-      if (!det && !prep) { adjs = []; adjIdx = []; } // unsure these are adjectives
-      const start = det ? detIdx : adjs.length ? adjIdx[0] : i;
-      const ctxBefore = (tokens[start - 2]?.s ?? '') + (tokens[start - 1]?.s ?? '');
-      const num = !det && (NUMERALS.has(tokens[start - 2]?.w?.toLowerCase()) || /(?:^|\D)(?:[2-9]|\d{2,})\s*$/.test(ctxBefore)) ? 'pl' : null;
-
-      const outs = M.rewrite(e, { det, prep, adjs, num, noun: tok.noun.noun, prefix: tok.noun.prefix });
-      const alsoGerman = GERMAN_TOO.has(e.sLemma) || GERMAN_TOO.has(tok.w);
+      // Without an article or a preposition these may not be adjectives at all
+      // ("wir senden Offerten"). Where they agree with the noun as adjectives,
+      // the agreeing German forms come first and the model may keep them as they
+      // were: "verbindliche Offerte" -> "verbindliches Angebot".
+      let bare = null;
+      if (!det && !prep) { if (adjs.length) bare = { adjs, adjIdx }; adjs = []; adjIdx = []; }
+      const numAt = s => !det && (NUMERALS.has(tokens[s - 2]?.w?.toLowerCase()) ||
+        /(?:^|\D)(?:[2-9]|\d{2,})\s*$/.test((tokens[s - 2]?.s ?? '') + (tokens[s - 1]?.s ?? ''))) ? 'pl' : null;
+      const np = { det, prep, noun: tok.noun.noun, prefix: tok.noun.prefix };
+      let outs = modifier ? [] : M.rewrite(e, { ...np, adjs, num: numAt(det ? detIdx : adjs.length ? adjIdx[0] : head) });
+      if (bare && !modifier) {
+        const agreeing = M.rewrite(e, { ...np, adjs: bare.adjs, num: numAt(bare.adjIdx[0]) });
+        if (agreeing.some(o => o.adjs.some((a, j) => a !== bare.adjs[j]))) {
+          ({ adjs, adjIdx } = bare);
+          outs = [...agreeing, ...outs.map(o => ({ ...o, adjs }))];
+        }
+      }
+      const start = det ? detIdx : adjs.length ? adjIdx[0] : head;
+      // A preposition written apart from its article joins the phrase where it
+      // must change: "in der Offerte" becomes "im Angebot", as German contracts
+      // wherever it can; "in den Estrich" becomes "auf den Dachboden".
+      const sep = det && !det.prep && prep ? detIdx - 2 : -1;
       if (!outs.length) {
         const fallback = fallbackNoun(e, tok.noun, tok.w);
         if (alsoGerman) nameable(tok, tok.piece = { options: [tok.w, fallback], pick: 1, conf: CONF.word });
         else { tok.s = fallback; nameable(tok); }
         continue;
       }
+      const lead = o => {
+        const p = e.inAuf && prep === 'in' ? 'auf' : prep;
+        const joined = M.contract(p, o.det);
+        return joined && !M.contract(prep, det.form) ? joined : p + tokens[sep + 1].s + o.det;
+      };
+      const needSep = sep >= 0 && outs.some(o => lead(o) !== tokens.slice(sep, detIdx + 1).map(t2 => t2.s).join('').toLowerCase());
+      const from = needSep ? sep : start;
       const renderOut = o => {
         let s = '';
-        for (let x = start; x <= i; x++) {
+        for (let x = from; x <= i; x++) {
           const tk = tokens[x];
-          if (x === detIdx) s += matchCase(tk.s, o.det);
-          else if (adjIdx.includes(x)) s += matchCase(tk.s, o.adjs[adjIdx.indexOf(x)]);
+          if (needSep && x === sep) { s += matchCase(tk.s, lead(o)); x = detIdx; }
+          else if (x === detIdx) s += matchCase(tk.s, o.det);
+          else if (adjIdx.includes(x)) s += matchCase(tk.s, fixSS(o.adjs[adjIdx.indexOf(x)]));
           else if (x === i) s += allCaps(tk.w) ? o.noun.toUpperCase() : o.noun;
-          else s += tk.s;
+          else s += tk.w ? ruleSS(tk) : tk.s;
         }
         return s;
       };
       const options = [...new Set(outs.map(renderOut))];
+      // Without an article, a Swiss noun that is the same in both numbers
+      // ("Lauch und Rüebli", "Kaffee und Gipfeli") is most likely plural: German
+      // would put an article before a singular.
+      const pl = !det && outs.some(o => o.num === 'sg') ? outs.find(o => o.num === 'pl') : null;
+      const pick = pl ? options.indexOf(renderOut(pl)) : 0;
       // The original stays a candidate where it may be German after all: a word
       // German also uses, or a bare noun opening a sentence, where German puts
       // verbs ("Entscheide dich"). The model keeps it only when clearly better.
-      const bareStart = !det && !adjs.length && atSentenceStart(text, tok.at);
-      const orig = tokens.slice(start, i + 1).map(t2 => t2.w ?? t2.s).join('');
+      const bareStart = !det && !adjs.length && atSentenceStart(text, tokens[head].at);
+      const orig = tokens.slice(from, i + 1).map(t2 => t2.w ?? t2.s).join('');
       const piece = alsoGerman || bareStart
-        ? { options: [orig, ...options], pick: 1, conf: CONF.word }
-        : options.length === 1 ? { options, pick: 0, rank: false } : { options, pick: 0, conf: CONF.form };
-      setSpan(tokens, start, i, piece);
+        ? { options: [orig, ...options], pick: 1 + pick, conf: CONF.word }
+        : options.length === 1 ? { options, pick: 0, rank: false } : { options, pick, conf: CONF.form };
+      setSpan(tokens, from, i, piece);
       nameable(tok, piece);
       followUps(tokens, i, outs[0].oldCell, outs[0].cell, piece);
     }
@@ -435,22 +553,27 @@
       const tk = tokens[r];
       if (free(tk)) {
         const forms = [...new Set(M.relMap(tk.s, oldCell, newCell).map(f => matchCase(tk.s, f)))].filter(f => f !== tk.s);
-        const nounNext = isSpace(tokens[r + 1]) && tokens[r + 2]?.w && isUpper(tokens[r + 2].w[0]);
+        const nounNext = isSpace(tokens[r + 1]) && tokens[r + 2]?.w && isUpper(tokens[r + 2].w[0]) && !POLITE.has(tokens[r + 2].w);
         if (forms.length && !nounNext) follow(tk, forms);   // a noun after it means "das" was an article; several forms: model picks the case
       }
     }
     if (oldCell === 'p' || newCell === 'p') return;
-    let ends = 0, blocked = false, wordsInSentence = 0;
+    let ends = 0, blocked = false, wordsInSentence = 0, newClause = false;
     for (let x = i + 1; x < tokens.length; x++) {
       const tk = tokens[x];
       if (!tk.w) {
         const n = (tk.s.match(/[.!?](?:\s|$)/g) || []).length; // not "1.250.000"
         if (n) { ends += n; if (ends >= 2) break; blocked = false; wordsInSentence = 0; }
+        if (/[,;:()–—]/.test(tk.s)) newClause = true;
         continue;
       }
       const first = wordsInSentence === 0;
       wordsInSentence++;
+      if (CONJUNCTIONS.has(tk.w.toLowerCase())) newClause = true;
+      // an ss-word ("dass", "muss") is no noun, unless capitalised mid-sentence
+      if (tk.piece?.kind === 'eszett' && !tk.skip) { if (isUpper(tk.w[0]) && !first) blocked = true; continue; }
       if (!free(tk)) { blocked = true; continue; } // another noun of ours
+      if (!first && POLITE.has(tk.w)) continue;        // "Sie" mid-sentence is the reader, not the noun
       const forms = [...new Set(M.pronMap(tk.s, oldCell, newCell).map(f => matchCase(tk.s, f)))].filter(f => f !== tk.s);
       if (!forms.length) {
         if (isUpper(tk.w[0]) && !first) blocked = true; // some other noun it may refer to
@@ -459,6 +582,9 @@
       // In the next sentence only a pronoun that opens it continues the topic.
       // "… auf dem Trottoir. Weil es so heiss war" is about the weather, not the pavement.
       if (blocked || (ends && !first)) continue;
+      // A pronoun in the noun's own clause cannot refer to it: in "Wegen dem
+      // Entscheid ärgert er sich" he is a person. It needs a new clause first.
+      if (!ends && !newClause) continue;
       if (tk.s.toLowerCase() === 'es' && impersonal(tokens, x)) continue;
       follow(tk, forms, { ctx: 2 });                   // several forms: model picks the case
     }
@@ -543,8 +669,10 @@
   }
 
   // "Ich bin gesessen" -> "Ich habe gesessen": position verbs take haben.
+  // "gelegen" is also an adjective ("Das Hotel ist ruhig gelegen", "Mir ist daran
+  // gelegen"), so there the model chooses and the original is the default.
   function sein2habenPass(tokens) {
-    const { forms, participles } = D.syntax.sein2haben;
+    const { forms, participles, alsoAdjective = [] } = D.syntax.sein2haben;
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       if (!free(tok)) continue;
@@ -552,8 +680,11 @@
       if (!swap) continue;
       const { text } = clauseText(tokens, i);
       const words = text.toLowerCase().split(/[^\p{L}]+/u);
-      if (!participles.some(pp => words.includes(pp))) continue;
-      tok.s = matchCase(tok.s, swap);
+      const found = participles.filter(pp => words.includes(pp));
+      if (!found.length) continue;
+      const swapped = matchCase(tok.s, swap);
+      if (found.every(pp => alsoAdjective.includes(pp))) tok.piece = { options: [tok.s, swapped], pick: 0, conf: CONF.position };
+      else tok.s = swapped;
     }
   }
 
@@ -569,9 +700,12 @@
       const { a } = clauseText(tokens, i, true);
       let firstWord = a;
       while (firstWord < i && !tokens[firstWord].w) firstWord++;
-      // "es hat …", or "hat es …?" where the verb opens the clause. In
-      // "Sie hat es eilig" the subject is "sie", so it is an ordinary "haben".
-      if (!isEs(tokens[i - 2]) && !(firstWord === i && isEs(tokens[i + 2]))) continue;
+      // "es hat …", "hat es …?" where the verb opens the clause, or "hat es"
+      // after a place or time ("Im Kühlschrank hat es noch Milch"). In "Sie hat
+      // es eilig" the subject is "sie", so it is an ordinary "haben".
+      const opener = tokens[firstWord]?.w?.toLowerCase();
+      const setting = !!opener && firstWord < i && (M.PREP[opener] || M.parseDet(opener)?.prep || SETTINGS.has(opener));
+      if (!isEs(tokens[i - 2]) && !((firstWord === i || setting) && isEs(tokens[i + 2]))) continue;
       const { b, text: rest } = clauseText(tokens, i);
       if (PARTICIPLE.test(rest)) continue;               // "es hat geregnet" is a perfect
       const swapped = spanText(tokens, i, b, { [i]: matchCase(tok.s, swap) });
@@ -581,14 +715,19 @@
       if (m)
         for (const end of ['e', 'en', 'er', 'es', 'em'])
           options.push(`${m[1]}${m[3]}${end} ${m[2]}${m[4]}`);
-      setSpan(tokens, i, b, { options: [...new Set(options)], pick: options.length > 2 ? 2 : 1, conf: CONF.grammar });
+      // Without the model the rules' "es gibt" stands; the model must find it
+      // clearly better than the original, with the sentence before in view,
+      // since "es" may be a thing mentioned there.
+      setSpan(tokens, i, b, { options: [...new Set(options)], pick: options.length > 2 ? 2 : 1, def: 0,
+                              conf: CONF.existential, ctx: 2 });
     }
   }
 
   // "Der Kollege, wo mir hilft" -> "der mir hilft". After a place or a time,
-  // "wo" is ordinary German and stays.
+  // "wo" is ordinary German and stays. The last part of a compound decides:
+  // "Wohnort" is a place, "Tagesmutter" is not.
   function woPass(tokens) {
-    const keep = new RegExp(D.syntax.woKeep, 'i');
+    const keep = new RegExp('(?:' + D.syntax.woKeep + ')$', 'i');
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       if (!free(tok) || tok.s.toLowerCase() !== 'wo') continue;
@@ -628,7 +767,7 @@
       const end = tk.spanEnd ?? x;
       const orig = tokens.slice(x, end + 1).map(t2 => t2.w ?? t2.s).join('');
       const piece = tk.piece ?? tk.s;
-      if (typeof piece === 'object') { piece.orig = orig; pieces.push(piece); }
+      if (typeof piece === 'object') { piece.orig = orig; piece.at = tk.at; pieces.push(piece); }
       else {
         if (piece !== orig) fixed++;
         if (typeof pieces[pieces.length - 1] === 'string') pieces[pieces.length - 1] += piece;
@@ -643,6 +782,18 @@
   const countChoices = pieces =>
     pieces.filter(p => typeof p === 'object' && pieceText(p) !== p.orig).length;
 
+  // Is this text written in German spelling? Swiss spelling has no ß, so text
+  // with ß (at least `min` of them) and hardly any ss where the rules expect ß
+  // was written in Germany or Austria: its ss choices are the writer's own, and a
+  // word German also uses ("Estrich", "Store") is meant as German.
+  function germanSpelling(text, min = 2) {
+    const eszett = (text.match(/ß/g) || []).length;
+    if (eszett < min) return false;
+    let swiss = 0;
+    for (const w of text.match(/\p{L}*ss\p{L}*/gu) || []) if (fixSS(w) !== w) swiss++;
+    return eszett > 3 * swiss;
+  }
+
   function convert(text, opts = {}) {
     const t = tables(opts.mode || 'hamburg');
     // Pages and blocks explaining words keep their examples ("sagt man Velo",
@@ -655,11 +806,16 @@
       changes++;
       return int.replace(/['’]/g, '.') + (dec ? ',' + dec.slice(1) : '');
     });
+    // Swiss prices take a decimal point: "CHF 12.50", "Fr. 3.–", "12.50 Franken".
+    text = text.replace(PRICE, (m, cur, int, dec, int2, dec2) => {
+      changes++;
+      return cur !== undefined ? `${cur}${int},${dec}` : `${int2},${dec2}`;
+    });
     const tokens = [];
     for (const m of text.matchAll(/(\p{L}+)|[^\p{L}]+/gu))
       tokens.push(m[1] ? { w: m[1], s: m[1], at: m.index } : { s: m[0], at: m.index });
-    wordPass(t, text, tokens, opts.context);
-    npPass(tokens, text);
+    wordPass(t, text, tokens, opts);
+    npPass(tokens, text, opts);
     sein2habenPass(tokens);
     esHatPass(tokens);
     woPass(tokens);
@@ -697,7 +853,9 @@
       if (p.name) namePieces.push(p);
       if (p.kind === 'eszett') { eszettPieces.push(p); return; }
       if (p.rank === false) return;                     // nothing to rank, only a name check
-      jobs.push({ q, key: p.key, cf: p.cf, def: p.pick, conf: p.conf ?? CONF.form,
+      // `def` is what the model must beat; usually the rules' pick, but a choice
+      // may show the rules' answer first and still ask the model to beat the original.
+      jobs.push({ q, key: p.key, cf: p.cf, def: p.def ?? p.pick, conf: p.conf ?? CONF.form,
                   opts: p.options, texts: candidates(pieces, q) });
     });
     // All ss decisions and name checks of a text go to the eszett model in one pass.
@@ -788,7 +946,7 @@
     return out;
   }
 
-  const api = { convert, candidates, renderPieces, resolve, countChoices, isMeta, matchCase };
+  const api = { convert, candidates, renderPieces, resolve, countChoices, isMeta, germanSpelling, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);

@@ -14,6 +14,9 @@
   const CONTRACT = { im: ['in', 'dem'], am: ['an', 'dem'], zum: ['zu', 'dem'], zur: ['zu', 'der'], vom: ['von', 'dem'], beim: ['bei', 'dem'], ins: ['in', 'das'], ans: ['an', 'das'], aufs: ['auf', 'das'], durchs: ['durch', 'das'], fürs: ['für', 'das'], ums: ['um', 'das'] };
   const CONTRACTED = {};
   for (const [short, [prep, det]] of Object.entries(CONTRACT)) (CONTRACTED[prep] ??= {})[det] = short;
+  // The contractions German writes by default; "aufs", "fürs", "ums" are optional.
+  const USUAL = new Set(['im', 'am', 'zum', 'zur', 'vom', 'beim', 'ins', 'ans']);
+  const contract = (prep, det) => { const c = CONTRACTED[prep]?.[det]; return USUAL.has(c) ? c : undefined; };
 
   // Cases a preposition allows (0 nom, 1 acc, 2 dat, 3 gen).
   const PREP = {};
@@ -62,7 +65,8 @@
 
   const genS = w => w + (/(s|ß|x|z|sch|tz)$/.test(w) ? 'es' : 's');
   const weakForm = w => w + (w.endsWith('e') ? 'n' : 'en');
-  const datPl = w => /[ns]$/.test(w) ? w : w + 'n';
+  // dative plural: "Tagen", but not after a vowel ("den Paprika", "den Zucchini")
+  const datPl = w => /[nsaiouy]$/.test(w) ? w : w + 'n';
 
   // Forms a Swiss noun takes for number (sg|pl) and case c.
   function swissForms(e, num, c) {
@@ -72,15 +76,17 @@
     }
     if (e.sG === 'p') return [];
     if (e.sG === 'f') return [e.sLemma];
-    if (e.sWeak) return c === 0 ? [e.sLemma] : [weakForm(e.sLemma)];
-    return c === 3 ? [e.sLemma + 's', e.sLemma + 'es'] : [e.sLemma];
+    // Swiss writing often leaves a weak noun bare ("einen kleinen Bub"); German declines it.
+    if (e.sWeak) return c === 0 ? [e.sLemma] : [weakForm(e.sLemma), e.sLemma];
+    // a genitive after a vowel is often left bare: "eines Meitli", "des Znüni"
+    return c === 3 ? [e.sLemma + 's', e.sLemma + 'es', ...(/[aeiouy]$/.test(e.sLemma) ? [e.sLemma] : [])] : [e.sLemma];
   }
 
   // German noun form (last word of the replacement only).
   function germanNoun(e, num, c) {
-    if (num === 'pl') return c === 2 ? datPl(e.gPl) : e.gPl;
+    if (num === 'pl') return c === 2 && !e.gInv ? datPl(e.gPl) : e.gPl;
     if (e.gG === 'f') return e.gLemma;
-    if (e.gWeak) return c === 0 ? e.gLemma : weakForm(e.gLemma);
+    if (e.gWeak) return c === 0 ? e.gLemma : c === 3 && e.gGen ? e.gGen : weakForm(e.gLemma); // "des Spitznamens"
     return c === 3 ? (e.gGen || genS(e.gLemma)) : e.gLemma;
   }
 
@@ -109,7 +115,10 @@
       for (let c = 0; c < 4; c++) {
         if (prepCases && !prepCases.includes(c)) continue;
         if (!swissForms(e, num, c).includes(np.noun)) continue;
-        if (np.det ? detForm(np.det, cell, c) !== np.det.form : c === 3 && num === 'sg') continue; // bare genitive singular is rare
+        // A bare genitive singular is rare, unless the noun's own form shows it
+        // ("Umschreibung Führerausweises" is not "Umschreibung Führerschein").
+        if (np.det ? detForm(np.det, cell, c) !== np.det.form
+                   : c === 3 && num === 'sg' && [0, 1, 2].some(c2 => swissForms(e, num, c2).includes(np.noun))) continue;
         const table = adjTable(np.det, cell);
         if (!np.adjs.every(a => splitAdj(a)?.end === table[cell][c])) continue;
         readings.push({ num, c });
@@ -120,12 +129,14 @@
       const n2 = newNumber(e, num);
       const cell = n2 === 'pl' ? 'p' : e.gG;
       const table = adjTable(np.det, cell);
-      const det = np.det ? renderDet(np.det, cell, c) : null;
+      // "im Estrich" is "auf dem Dachboden"
+      const d = np.det && e.inAuf && np.det.prep === 'in' ? { ...np.det, prep: 'auf' } : np.det;
+      const det = d ? renderDet(d, cell, c) : null;
       if (np.det && det === null) continue;
       const adjs = np.adjs.map(a => splitAdj(a).stem + table[cell][c]);
       const g = germanWords(e, cell, c, table, n2);
       g[g.length - 1] = np.prefix ? np.prefix + g[g.length - 1].toLowerCase() : g[g.length - 1];
-      outs.push({ det, adjs, noun: g.join(' '), cell, c, oldCell: num === 'pl' ? 'p' : e.sG });
+      outs.push({ det, adjs, noun: g.join(' '), cell, c, num, oldCell: num === 'pl' ? 'p' : e.sG });
     }
     return outs;
   }
@@ -153,6 +164,6 @@
     return out;
   }
 
-  root.HD_MORPH = { parseDet, rewrite, relMap, pronMap, splitAdj, detCells, PREP, PRON, REL };
+  root.HD_MORPH = { parseDet, rewrite, relMap, pronMap, splitAdj, detCells, contract, PREP, PRON, REL };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.HD_MORPH;
 })(globalThis);
