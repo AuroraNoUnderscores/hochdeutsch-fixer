@@ -371,8 +371,10 @@ globalThis.HD_PDFTEXT = (() => {
     perPage.set(idx, jobs.flatMap(j => differences(j.asm.text, j.text).map(d => [j.asm.text.slice(d.s, d.e), d.t])));
     publish();
   }
-  // A page answered from a cache brings its list along.
-  function remember(idx, list) {
+  // A page answered from a cache brings its list along, and its text: the
+  // pages converted after it judge the document's spelling by all it has seen.
+  function remember(idx, list, items) {
+    if (Array.isArray(items)) pagesText.set(idx, items.map(it => it.str).join(' '));
     perPage.set(idx, list);
     publish();
   }
