@@ -61,5 +61,16 @@ const text = edits => edits.filter(e => e.t).map(e => e.t).join(' ');
     JSON.stringify(last?.line));
 }
 
+// 3. The highlights: a reset line marks just its changed words, in lines below too.
+{
+  const full = 'Das Velo steht vor dem Haus und das Velo steht dort auch am Abend noch';
+  const edits = await convert([[full], [full], [full], ['Das Velo steht vor dem Haus und das Velo steht dort.', 300]], 360);
+  const lines = edits.filter(e => e.line).flatMap(e => [e, ...(e.line.more || []).map(m => ({ t: m.text, marks: m.marks }))]);
+  const marked = lines.flatMap(e => e.marks.map(([a, b]) => e.t.slice(a, b)));
+  check('every changed word is marked, and nothing else', marked.length > 0 && marked.every(w => w === 'Fahrrad'), JSON.stringify(marked));
+  const count = lines.reduce((n, e) => n + (e.t.match(/Fahrrad/g) || []).length, 0);
+  check('as often as it is there', marked.length === count, `${marked.length} marks, ${count} times Fahrrad`);
+}
+
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exitCode = failures ? 1 : 0;

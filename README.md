@@ -219,7 +219,9 @@ column's edge, and a paragraph that grew takes another line below it when the
 space there is free. Paragraphs mixing fonts (a bold word inside) or with
 centred or indented lines keep their lines: a longer word there may use the free
 space at the end of its line, then narrows the word gaps, and only then is
-squeezed.
+squeezed. A line set anew reaches the text layer (selecting, copying, finding,
+the highlights) word by word, each word where the line's setting put it, so
+what is selected is what is shown, gaps of a justified line included.
 
 The browser's find bar searches the converted text, also on pages pdf.js has not
 drawn yet (each gets its text in an invisible layer, which hands a match over to
@@ -300,6 +302,9 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
   pick and what it picked over; a kept name says what kind of name the model
   took it for. The card sits in a closed shadow root and takes no pointer
   events; Escape or scrolling hides it, a tap shows it on touch screens.
+  In a PDF the changed words are tinted too (in the text layer pdf.js lays over
+  the drawn page, so it shows on screen, not in print); the card and the name
+  underline are for web pages only.
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.
