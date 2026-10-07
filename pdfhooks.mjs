@@ -40,8 +40,13 @@ function buildKeys(items, edits) {
   items.forEach((it, n) => {
     itemStart[n] = keys.length;
     const s = it.str || '';
-    for (let o = 0; o < s.length; o++) {
-      for (const ch of norm(s[o])) if (!KEEP.test(ch)) { keys.push(ch); at.push([n, o]); }
+    // by code point: a formula's 𝑆 or 𝛼 is two UTF-16 units, normalised to one
+    // letter; keys are UTF-16 units, as the glyphs' are (canvas below)
+    let o = 0;
+    for (const cp of s) {
+      const nn = norm(cp);
+      for (let u = 0; u < nn.length; u++) if (!KEEP.test(nn[u])) { keys.push(nn[u]); at.push([n, o]); }
+      o += cp.length;
     }
   });
   // each edit as a range of key positions
@@ -57,7 +62,25 @@ function buildKeys(items, edits) {
     if (k0 >= 0) ranges.push({ k0, k1, text: ed.t, line: ed.line, of: ed.of, item: ed.i, room: ed.room, lineLast: ed.lineLast });
   }
   ranges.sort((a, b) => a.k0 - b.k0);
-  return { keys: keys.join(''), ranges, byItem, keyItem: at.map(a => a[0]) };
+  return { keys: keys.join(''), ranges, byItem, keyItem: at.map(a => a[0]), itemStart };
+}
+
+// A line's new text begins with what a run draws (its keys): the rest of the
+// text, for the runs after it; or null.
+function keep(drawn, text) {
+  let d = 0, t = 0;
+  while (d < drawn.length && t < text.length) {
+    const cp = String.fromCodePoint(text.codePointAt(t));
+    const nn = norm(cp);
+    t += cp.length;
+    for (let u = 0; u < nn.length; u++) {
+      if (KEEP.test(nn[u])) continue;
+      if (nn[u] !== drawn[d++]) return null;
+    }
+  }
+  if (d < drawn.length) return null;
+  const rest = text.slice(t).replace(/^\s+/, '');
+  return rest ? rest : null;
 }
 
 function applyEdits(str, list) {
@@ -137,7 +160,16 @@ const FAMILIES = [
   [/^(couriernew|courier|liberationmono|cousine|nimbusmono)/i, '"Courier New"'],
   [/^georgia/i, 'Georgia'], [/^verdana/i, 'Verdana'], [/^calibri/i, 'Calibri'], [/^cambria/i, 'Cambria'],
   [/^segoeui/i, '"Segoe UI"'], [/^tahoma/i, 'Tahoma'], [/^trebuchet/i, '"Trebuchet MS"'],
-  [/^garamond/i, 'Garamond'], [/^bookantiqua|^palatino/i, '"Palatino Linotype"'], [/^centurygothic/i, '"Century Gothic"'],
+  [/^garamond/i, 'Garamond'], [/^centurygothic/i, '"Century Gothic"'],
+  // LaTeX documents: TeX Gyre and URW clones of the classic families, and their font file names
+  [/^(bookantiqua|palatino|texgyrepagella|tgpagella|pagella|urwpalladio|palladio|p052|newpx|pxfonts|ppl[rb])/i, '"Palatino Linotype", Palatino, "TeX Gyre Pagella", "URW Palladio L", P052, "Book Antiqua"'],
+  [/^(texgyretermes|tgtermes|newtx|txfonts|nimbusromno9|ptm[rb])/i, '"Times New Roman", Times, "TeX Gyre Termes", "Nimbus Roman"'],
+  [/^(texgyreheros|tgheros|nimbussanl|phv[rb])/i, 'Arial, Helvetica, "TeX Gyre Heros", "Nimbus Sans"'],
+  [/^(texgyrecursor|tgcursor|nimbusmonl|pcr[rb])/i, '"Courier New", Courier, "TeX Gyre Cursor", "Nimbus Mono PS"'],
+  [/^(texgyrebonum|bookman|urwbookman|pbk[lr])/i, '"Bookman Old Style", Bookman, "TeX Gyre Bonum", "URW Bookman"'],
+  [/^(texgyreschola|centuryschoolbook|c059|pnc[rb])/i, '"Century Schoolbook", "TeX Gyre Schola", C059'],
+  [/^(lmroman|latinmodern|cmr|cmbx|cmti|cmsl|sfrm|cmuserif)/i, '"Latin Modern Roman", "CMU Serif", "Computer Modern", serif'],
+  [/^(lmsans|cmss|cmusans)/i, '"Latin Modern Sans", "CMU Sans Serif", sans-serif'],
 ];
 const fontStyles = new Map();
 function styleOf(font) {
@@ -184,27 +216,50 @@ function canvas(page, operatorList) {
     const owner = [];
     glyphs.forEach((g, gi) => {
       if (typeof g !== 'object' || !g) return;
-      for (const ch of norm(g.unicode || '')) if (!KEEP.test(ch)) { k += ch; owner.push(gi); }
+      const nn = norm(g.unicode || '');
+      for (let u = 0; u < nn.length; u++) if (!KEEP.test(nn[u])) { k += nn[u]; owner.push(gi); }
     });
     if (!k) return null;
-    let p = state.keys.startsWith(k, run.cursor) ? run.cursor : state.keys.indexOf(k, run.cursor);
-    if (p < 0 || p - run.cursor > 4000) {
+    // Where this run is in the page's text: next, as a rule. A short run ("(b)",
+    // "|", a subscript) is found again many times further on, so it may only
+    // be a little ahead, and is never placed far away by a guess.
+    const ahead = state.keys.startsWith(k, run.cursor) ? run.cursor : state.keys.indexOf(k, run.cursor);
+    let p = ahead;
+    if (ahead >= 0 && ahead - run.cursor <= (k.length >= 4 ? 4000 : 40)) run.cursor = ahead + k.length;
+    else {
       p = state.keys.indexOf(k);             // drawn out of order (a form, a repeated header)
-      if (p < 0) return null;
-    } else run.cursor = p + k.length;
+      if (p < 0 || (k.length < 4 && state.keys.indexOf(k, p + 1) >= 0)) return null;
+    }
     const end = p + k.length;
     let hits = state.ranges.filter(r => r.k1 > p && r.k0 < end);
     if (!hits.length) return null;
     // A reflowed line is replaced as a whole, gaps between its old words included.
     const lines = new Map();
     for (const r of hits) if (r.of != null) {
-      const l = lines.get(r.of) || lines.set(r.of, { k0: r.k0, k1: r.k1, text: '', line: null }).get(r.of);
+      const l = lines.get(r.of) || lines.set(r.of, { of: r.of, k0: r.k0, k1: r.k1, text: '', line: null }).get(r.of);
       l.k0 = Math.min(l.k0, r.k0); l.k1 = Math.max(l.k1, r.k1);
       if (r.line) { l.text = r.text; l.line = r.line; l.starts = r.k0; }
     }
+    // A line drawn in several runs ("(a)" and the item's text, or words around a
+    // formula): a run that still reads as the line begins is drawn as it is, and
+    // the rest of the line goes into the next run.
+    for (const l of lines.values()) {
+      if (!l.line) continue;
+      const carried = run.carry?.get(l.of);
+      if (carried === null || (carried && carried.from > p)) { l.drop = true; continue; }   // drawn already
+      if (carried) { l.text = carried.text; l.starts = p; }
+      if (l.starts < p) { l.drop = true; continue; }
+      if (l.k1 > end) {
+        const rest = keep(state.keys.slice(l.starts, end), l.text);
+        if (rest != null) { (run.carry ||= new Map()).set(l.of, { from: end, text: rest }); l.kept = true; continue; }
+      }
+      (run.carry ||= new Map()).set(l.of, null);
+    }
     if (lines.size) {
-      hits = [...hits.filter(r => r.of == null), ...[...lines.values()].map(l => ({ ...l, k0: l.starts ?? l.k0 }))]
+      hits = [...hits.filter(r => r.of == null), ...[...lines.values()].filter(l => !l.kept)
+        .map(l => (l.line && !l.drop ? { ...l, k0: l.starts } : { k0: l.k0, k1: l.k1, text: '', drop: true }))]
         .sort((a, b) => a.k0 - b.k0);
+      if (!hits.length) return null;
     }
 
     const space = map.get(' ');
@@ -225,7 +280,7 @@ function canvas(page, operatorList) {
       const g0 = owner[a], g1 = owner[b - 1];
       while (gi < g0) out.push(glyphs[gi++]);
       // the replacement goes where the edit starts; a part of it in another run is dropped there
-      if (r.k0 >= p) {
+      if (!r.drop && r.k0 >= p) {
         for (const ch of r.text) {
           if (/\s/.test(ch)) { out.push(space ? space : -spaceWidth); continue; }
           out.push(glyphFor(ch));
@@ -237,11 +292,23 @@ function canvas(page, operatorList) {
     const clean = out.filter(g => g !== null);
     const was = widthOf(glyphs), now = widthOf(clean);
     const isGap = g => (typeof g === 'number' && g < -100) || (typeof g === 'object' && g?.isSpace);
-    // text space per unit of page space, from where this run's items sit on the page
-    const itemsHere = [...new Set(state.keyItem.slice(p, end))].map(i => state.items[i]);
+    // Text space per unit of page space, from where this run's items sit on the
+    // page. A run drawing only part of an item (pdf.js joined "(a)" and the
+    // words after it) gets that part of the item's width, by its letters.
+    const idxHere = [...new Set(state.keyItem.slice(p, end))];
+    const itemsHere = idxHere.map(i => state.items[i]);
+    const keysOf = i => (state.itemStart[i + 1] ?? state.keys.length) - state.itemStart[i];
+    const partial = idxHere.some(i => state.itemStart[i] < p || state.itemStart[i] + keysOf(i) > end);
     const x0 = Math.min(...itemsHere.map(it => it.transform[4]));
     const x1 = Math.max(...itemsHere.map(it => it.transform[4] + (it.width || 0)));
-    const perUser = x1 > x0 ? was / (x1 - x0) : 0;
+    const span = !partial ? x1 - x0 : idxHere.reduce((w, i) => {
+      const from = Math.max(p, state.itemStart[i]), to = Math.min(end, state.itemStart[i] + keysOf(i));
+      return w + (state.items[i].width || 0) * (to - from) / Math.max(1, keysOf(i));
+    }, 0);
+    const perUser = span > 0 ? was / span : 0;
+    // how far into its line this run starts, in page space (a line continued from the run before)
+    const first = idxHere[0];
+    const into = partial && first != null ? (state.items[first].width || 0) * Math.max(0, p - state.itemStart[first]) / Math.max(1, keysOf(first)) : 0;
     const kern = delta => -delta * 1000 / size;    // a kerning number moving on by delta
     const spread = (list, extra) => {               // widen (or narrow) the word gaps by extra in total
       const gaps = list.map((g, n) => (isGap(g) ? n : -1)).filter(n => n >= 0);
@@ -254,11 +321,13 @@ function canvas(page, operatorList) {
     };
     let scale = 1;
     let more = null;
-    const line = hits.find(r => r.line && r.k0 >= p)?.line;
+    const lineHit = hits.find(r => r.line && !r.drop && r.k0 >= p);
+    const line = lineHit?.line;
     if (line && perUser) {
       // a reflowed line: justified to its old width, or as wide as it is, up to the column's edge
-      if (line.justify) spread(clean, line.width * perUser - now);
-      else if (now > line.cap * perUser) scale = (line.cap * perUser) / now;
+      const before = lineHit.k0 > p ? 0 : into;
+      if (line.justify) spread(clean, (line.width - before) * perUser - now);
+      else if (now > (line.cap - before) * perUser) scale = ((line.cap - before) * perUser) / now;
       // and the lines it gained below
       more = (line.more || []).map(m => {
         const gl = [];
