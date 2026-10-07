@@ -328,7 +328,7 @@ globalThis.HD_PDFTEXT = (() => {
     const pageText = items.map(it => it.str).join(' ');
     pagesText.set(idx, pageText);
     const docText = [...pagesText.values()].join(' ').slice(0, 20000);
-    if (E.isMeta(pageText, 'page')) return reply({ edits: [], version: 1 });
+    if (E.isMeta(pageText, 'page')) return reply({ edits: [], version: 1, changes: [] });
     const german = E.germanSpelling(docText, 3);
     const docGerman = germanish(docText);
     const jobs = [];
@@ -345,8 +345,10 @@ globalThis.HD_PDFTEXT = (() => {
       : reflow(items, j.asm, j.text, column, open) || toItems(differences(j.asm.text, j.text), j.asm).map(ed => ({ ...ed, ...room.get(ed.i) })));
     const choices = settings.llm && jobs.some(j => j.r.pieces.some(p => typeof p === 'object'));
     let answered = false;
-    const answer = version => { answered = true; reply({ edits: editsNow(), version }); };
-    if (!choices) { answer(1); tally(idx, jobs); return; }
+    // A final answer carries the page's list of changes (a cache may keep it);
+    // one given before the model has spoken does not.
+    const answer = (version, final) => { answered = true; reply({ edits: editsNow(), version, ...(final ? { changes: perPage.get(idx) } : {}) }); };
+    if (!choices) { tally(idx, jobs); answer(1, true); return; }
     // The model settles the rest; the page waits for it a moment, so it is
     // drawn once, and is drawn again if the model takes longer.
     const timer = setTimeout(() => answer(1), 2500);
@@ -359,15 +361,22 @@ globalThis.HD_PDFTEXT = (() => {
     }
     clearTimeout(timer);
     tally(idx, jobs);
-    if (!answered) answer(2);
-    else redraw({ page: idx, edits: editsNow(), version: 2 });
+    if (!answered) answer(2, true);
+    else redraw({ page: idx, edits: editsNow(), version: 2, changes: perPage.get(idx) });
   }
 
   // What changed on each page, for the popup's count and list.
   const perPage = new Map();
   function tally(idx, jobs) {
-    const list = jobs.flatMap(j => differences(j.asm.text, j.text).map(d => [j.asm.text.slice(d.s, d.e), d.t]));
+    perPage.set(idx, jobs.flatMap(j => differences(j.asm.text, j.text).map(d => [j.asm.text.slice(d.s, d.e), d.t])));
+    publish();
+  }
+  // A page answered from a cache brings its list along.
+  function remember(idx, list) {
     perPage.set(idx, list);
+    publish();
+  }
+  function publish() {
     changes.clear();
     count = 0;
     for (const l of perPage.values()) for (const [from, to] of l) {
@@ -382,5 +391,5 @@ globalThis.HD_PDFTEXT = (() => {
     }).catch(() => {});
   }
 
-  return { convertPage, status: () => ({ count, mode: settings?.mode || 'hamburg' }) };
+  return { convertPage, remember, status: () => ({ count, mode: settings?.mode || 'hamburg' }) };
 })();
