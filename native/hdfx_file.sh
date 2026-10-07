@@ -7,7 +7,7 @@
 # Firefox's native messaging: each message is a 32-bit length in the
 # machine's byte order, then that many bytes of JSON. In: {"path": base64 of
 # the path}. Out: {"chunk": base64} per 512 KiB (a message to the extension
-# may be at most 1 MB), then {"done": true}; or {"error": "..."}.
+# may be at most 1 MB), then {"done": true, "size": bytes}; or {"error": "..."}.
 LC_ALL=C
 export LC_ALL
 
@@ -37,11 +37,14 @@ head -c 1024 "$path" | grep -q '%PDF-' || fail 'not a PDF'
 size=$(wc -c < "$path" | tr -d ' ')
 [ "$size" -le 536870912 ] || fail 'too large'
 
+# each piece read in full (tail seeks, head reads until it has them all: a
+# single read may return less, on network or synced folders), and the size
+# at the end, so the extension can tell that it has every byte
 CHUNK=524288
-i=0
-while [ $((i * CHUNK)) -lt "$size" ]; do
-  data=$(dd if="$path" bs=$CHUNK skip=$i count=1 2>/dev/null | base64 | tr -d '\n')
+at=0
+while [ "$at" -lt "$size" ]; do
+  data=$(tail -c +$((at + 1)) "$path" | head -c $CHUNK | base64 | tr -d '\n')
   send "{\"chunk\":\"$data\"}"
-  i=$((i + 1))
+  at=$((at + CHUNK))
 done
-send '{"done":true}'
+send "{\"done\":true,\"size\":$size}"

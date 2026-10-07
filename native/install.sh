@@ -29,4 +29,21 @@ cat > "$hosts/$name.json" <<EOF
 }
 EOF
 echo "Installed: $dir/hdfx_file.sh"
-echo "PDFs from this computer now open converted in Firefox without asking."
+
+# Self-test: what Firefox will do, the helper reading a small PDF
+pdf=$(mktemp "${TMPDIR:-/tmp}/hdfx-selftest-XXXXXX") && mv "$pdf" "$pdf.pdf" && pdf="$pdf.pdf"
+printf '%%PDF-1.4\n%%%%EOF\n' > "$pdf"
+req="{\"path\":\"$(printf '%s' "$pdf" | base64 | tr -d '\n')\"}"
+n=${#req}
+answer=$({ printf "$(printf '\\%03o\\%03o\\%03o\\%03o' $((n & 255)) $((n >> 8 & 255)) $((n >> 16 & 255)) $((n >> 24 & 255)))"; printf '%s' "$req"; } \
+  | "$dir/hdfx_file.sh" "$hosts/$name.json" hochdeutsch-fixer@addons.local 2>&1 | tr -d '\000-\010\016-\037')
+rm -f "$pdf"
+case "$answer" in
+  *'"chunk"'*'"done"'*)
+    echo "Self-test passed: PDFs from this computer now open converted in Firefox without asking."
+    echo "(Reload the PDF tab, or open the PDF again.)" ;;
+  *)
+    echo "Self-test FAILED: the helper answered: $answer"
+    echo "Firefox will keep asking for local PDFs. Please send this message to the extension's author."
+    exit 1 ;;
+esac

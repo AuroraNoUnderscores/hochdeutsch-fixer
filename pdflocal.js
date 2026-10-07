@@ -13,9 +13,18 @@
     return show(html);
   }
 
-  // the file helper (native/), where it is installed: no asking at all
+  // the file helper (native/), where it is installed: no asking at all. Why
+  // it did not open the file is kept, to be shown with the setup text.
+  let why = '';
   async function helper() {
-    return show(await browser.runtime.sendMessage({ type: 'pdf-local-native' }).catch(() => null));
+    const r = await browser.runtime.sendMessage({ type: 'pdf-local-native' }).catch(err => ({ error: String(err) }));
+    why = r?.error || '';
+    return show(r?.html);
+  }
+  function setup() {
+    $('setup').hidden = false;
+    $('why').textContent = why && why !== 'permission' ? `The helper did not open it: ${why}` : '';
+    $('why').hidden = !$('why').textContent;
   }
 
   function show(html) {
@@ -47,8 +56,11 @@
       e.preventDefault();
       const granted = await browser.permissions.request({ permissions: ['nativeMessaging'] }).catch(() => false);
       if (granted && await helper()) return;
-      $('setup').hidden = false;
+      if (!granted) why = 'permission';
+      setup();
     };
+    // the permission given, but the helper did not answer: say so at once
+    if (why && why !== 'permission') setup();
     // Back to the PDF, which Firefox then shows itself (pdfnet.js lets it through)
     $('original').onclick = e => { e.preventDefault(); history.back(); };
     const over = on => e => { e.preventDefault(); document.body.classList.toggle('over', on); };

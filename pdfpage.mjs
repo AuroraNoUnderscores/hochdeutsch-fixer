@@ -272,9 +272,14 @@ Object.defineProperty(Document.prototype, 'l10n', { configurable: true, get() { 
 l10n.connectRoot(root);
 l10n.translateRoots();
 
-// The browser starts the viewer's worker before the viewer asks for it.
-globalThis.pdfjsPreloadedWorker = new Worker(URL.createObjectURL(new Blob(
-  [`import ${JSON.stringify(BASE + 'build/pdf.worker.mjs')};`], { type: 'text/javascript' })), { type: 'module' });
+// The browser starts the viewer's worker before the viewer asks for it. On a
+// site's page a worker may not come from the extension, so a blob imports it;
+// on the extension's own page (a PDF from this computer) the extension's
+// rules forbid blob workers, and the worker is the extension's file itself.
+const WORKER = BASE + 'build/pdf.worker.mjs';
+globalThis.pdfjsPreloadedWorker = location.protocol === 'moz-extension:'
+  ? new Worker(WORKER, { type: 'module' })
+  : new Worker(URL.createObjectURL(new Blob([`import ${JSON.stringify(WORKER)};`], { type: 'text/javascript' })), { type: 'module' });
 
 // ---------- converted text, drawn and selectable (pdfhooks.mjs) ----------
 

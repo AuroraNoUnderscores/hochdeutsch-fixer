@@ -176,8 +176,17 @@
       if (!info) { viewerWaiting = true; return; }
       started = true;
       if (info.missing && location.protocol === 'moz-extension:') {
-        // a PDF from this computer: only the reader can hand it over again (pdflocal.js)
-        location.reload();
+        // a PDF from this computer: only the reader (or the file helper) can
+        // hand it over again (pdflocal.js). Once: were the bytes missing again
+        // right after, reloading would only go round and round.
+        let again = false;
+        try {
+          again = Date.now() - Number(sessionStorage.getItem('hdfx-pdf-reloaded') || 0) < 15000;
+          sessionStorage.setItem('hdfx-pdf-reloaded', String(Date.now()));
+        } catch {}
+        if (!again) { location.reload(); return; }
+        console.error('[Hochdeutsch-Fixer] the PDF\'s bytes are missing again after a reload');
+        post({ pdfjsLoadAction: 'supportsRangedLoading', length: 0, data: null, done: true });
         return;
       }
       if (info.missing) {

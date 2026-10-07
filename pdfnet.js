@@ -204,8 +204,11 @@ browser.tabs.onRemoved.addListener(tabId => shown.delete(tabId));
 // scripts that are content scripts on any other page (an extension page gets none).
 async function localViewerHtml() {
   const html = await viewerHtml();
-  const files = browser.runtime.getManifest().content_scripts.flatMap(c => c.js).filter(f => f !== 'content.js');
-  const tags = [...new Set(files)].map(f => `<script src="${EXT}${f}"></script>`).join('\n    ');
+  // Firefox lists them as full addresses (moz-extension://…/engine.js), not as
+  // the manifest's paths: each is made an address either way
+  const files = browser.runtime.getManifest().content_scripts.flatMap(c => c.js)
+    .map(f => new URL(f, EXT).href).filter(u => !u.endsWith('/content.js'));
+  const tags = [...new Set(files)].map(u => `<script src="${u}"></script>`).join('\n    ');
   return html.replace('<script src="' + EXT + 'pdfpage.mjs"', tags + '\n    <script src="' + EXT + 'pdfpage.mjs"');
 }
 
@@ -234,15 +237,21 @@ const HELPER = 'hochdeutsch_fixer';
 export async function localNative(sender) {
   const url = sender.url, tabId = sender.tab?.id ?? -1;
   const file = shown.get(tabId);
-  if (!url?.startsWith(LOCAL) || !file) return null;
+  if (!url?.startsWith(LOCAL) || !file) return { error: 'this tab was not opening a PDF from this computer' };
   const want = new URL(file);
   want.hash = '';
-  if (new URL(url).searchParams.get('file') !== want.href) return null;
-  if (!(await browser.permissions.contains({ permissions: ['nativeMessaging'] }))) return null;
+  if (new URL(url).searchParams.get('file') !== want.href) return { error: 'this tab was opening another file' };
+  if (!(await browser.permissions.contains({ permissions: ['nativeMessaging'] }))) return { error: 'permission' };
   const path = filePath(want);
-  const data = path && await readNative(path).catch(() => null);
-  if (!data) return null;
-  return local({ data: data.buffer, name: path.split(/[\\/]/).pop() }, sender);
+  if (!path) return { error: 'no path for ' + want.href };
+  let data;
+  try { data = await readNative(path); } catch (err) {
+    // what went wrong, for the page to show: the helper not found or not
+    // started (Firefox's message), or the helper's own answer
+    console.warn('[Hochdeutsch-Fixer] file helper:', path, err);
+    return { error: String(err?.message || err) };
+  }
+  return { html: await local({ data: data.buffer, name: path.split(/[\\/]/).pop() }, sender) };
 }
 
 // A file:// address as the system names the file: /home/… on Linux and macOS,
@@ -275,12 +284,14 @@ function readNative(path) {
       clearTimeout(timer);
       port.disconnect();
       if (!m?.done) return reject(new Error(m?.error || 'the helper failed'));
+      // every byte, or none: a PDF missing some shows only blank pages
+      if (typeof m.size === 'number' && m.size !== size) return reject(new Error(`the helper sent ${size} of ${m.size} bytes`));
       const data = new Uint8Array(size);
       let at = 0;
       for (const part of parts) { data.set(part, at); at += part.length; }
       resolve(data);
     });
-    port.onDisconnect.addListener(p => { clearTimeout(timer); reject(p.error || new Error('no helper')); });
+    port.onDisconnect.addListener(p => { clearTimeout(timer); reject(p.error || new Error('the helper stopped without answering')); });
     const utf8 = new TextEncoder().encode(path);
     port.postMessage({ path: btoa(String.fromCharCode(...utf8)) });
   });
