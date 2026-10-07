@@ -70,9 +70,37 @@
   check(texts.includes('Fahrrad') && texts.includes('Die Entscheidung') && texts.includes('1.250.000'),
         `highlights cover the new words: ${texts.join(' | ')}`);
   check(count('hd-name') >= 1 && [...CSS.highlights.get('hd-name')].some(r => r.toString() === 'Spital'), 'kept name underlined');
+
+  // pointing at a changed word shows its original (the card is in a closed
+  // shadow root; what the page can see is the word lit and the card's host)
+  const at = word => {
+    const r = [...CSS.highlights.get('hd-changed'), ...CSS.highlights.get('hd-name')].find(r => r.toString() === word);
+    const b = r.getBoundingClientRect();
+    return [b.left + b.width / 2, b.top + b.height / 2];
+  };
+  const point = async ([x, y]) => {
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, pointerType: 'mouse', bubbles: true }));
+    await new Promise(r => setTimeout(r, 150));
+  };
+  const lit = () => [...(CSS.highlights.get('hd-hover') || [])].map(r => r.toString()).join('|');
+  await point(at('Fahrrad'));
+  check(lit() === 'Fahrrad' && document.querySelector('hochdeutsch-fixer-tip'), `hovering a changed word shows it (${lit()})`);
+  await point(at('Bürgersteig'));
+  check(lit() === 'Bürgersteig', `…moves to the next word (${lit()})`);
+  await point(at('Spital'));
+  check(lit() === 'Spital', `…and to a kept name (${lit()})`);
+  const plain = document.querySelector('p').getBoundingClientRect();
+  await point([plain.right + 40, plain.top + 4]);
+  await new Promise(r => setTimeout(r, 150));
+  check(lit() === '', 'pointing beside the text hides it');
+  await point(at('Fahrrad'));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check(lit() === '', 'Escape hides it');
   window.__setHighlight(false);
   await new Promise(r => setTimeout(r, 200));
   check(count('hd-changed') === 0 && !document.getElementById('hochdeutsch-fixer-highlight'), 'highlights and style removed when off');
+  await point([10, 10]);
+  check(!document.querySelector('hochdeutsch-fixer-tip') && lit() === '', 'no card, no hover when highlights are off');
   log(`\n${fail ? `${fail} FAILED` : 'all passed'}`);
 </script>
 </body>
