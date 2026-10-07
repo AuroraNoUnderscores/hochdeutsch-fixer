@@ -2,7 +2,7 @@
 // from content scripts, one at a time. Decisions are cached; context-free ones
 // (a word's ß spelling) by word, so a page full of "Strasse" costs one call.
 import { load, score, eszett, MODEL } from './llm.js';
-import { download as pdfDownload, verify as pdfVerify } from './pdfnet.js';
+import { download as pdfDownload, verify as pdfVerify, local as pdfLocal } from './pdfnet.js';
 
 const state = { status: 'idle', progress: 0, decided: 0, error: null, model: MODEL };
 const cache = new Map();
@@ -122,6 +122,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === 'pdf-verify') return Promise.resolve(pdfVerify(msg.token, sender));
   if (msg?.type === 'pdf-download') return pdfVerify(msg.token, sender) ? pdfDownload(msg) : Promise.resolve();
   if (msg?.type === 'pdf-browser-info') return pdfBrowserInfo();
+  if (msg?.type === 'pdf-local') return pdfLocal(msg, sender);
   if (msg?.type === 'top-host') {
     try { return Promise.resolve(new URL(sender.tab?.url || '').hostname || null); } catch { return Promise.resolve(null); }
   }

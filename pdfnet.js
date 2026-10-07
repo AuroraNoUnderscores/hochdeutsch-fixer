@@ -176,6 +176,56 @@ browser.tabs.onRemoved.addListener(tabId => {
   for (let n = loads.length - 1; n >= 0; n--) if (loads[n].tabId === tabId) loads.splice(n, 1);
 });
 
+// ---------- PDFs on this computer ----------
+// Firefox shows a file:// PDF in its own viewer, which no extension may enter,
+// and no extension may read a file by itself. So such a tab goes to the
+// extension's page for it (pdflocal.html), where the reader hands the file over
+// once (a click on its name, or dropping it); its bytes then go to the same
+// viewer as any PDF's, kept here like a download's.
+const LOCAL = EXT + 'pdflocal.html';
+const shown = new Map();   // tabId -> the file:// PDF its pdflocal.html is for
+const isLocalPdf = url => { try { const u = new URL(url); return u.protocol === 'file:' && /\.pdf$/i.test(u.pathname); } catch { return false; } };
+
+browser.tabs.onUpdated.addListener((tabId, info) => {
+  if (!info.url || info.url.startsWith(LOCAL)) return;
+  // Back from pdflocal.html (or its "Firefox's viewer" button) shows the PDF as Firefox does
+  const back = shown.get(tabId) === info.url;
+  shown.delete(tabId);
+  if (back || !isLocalPdf(info.url) || !wanted(info.url)) return;
+  shown.set(tabId, info.url);
+  // the file in the query; its #page=… stays the hash, which the viewer reads as for any PDF
+  const u = new URL(info.url), hash = u.hash;
+  u.hash = '';
+  browser.tabs.update(tabId, { url: `${LOCAL}?file=${encodeURIComponent(u.href)}${hash}` }).catch(() => shown.delete(tabId));
+});
+browser.tabs.onRemoved.addListener(tabId => shown.delete(tabId));
+
+// The viewer page for a PDF from this computer: the same viewer, and the
+// scripts that are content scripts on any other page (an extension page gets none).
+async function localViewerHtml() {
+  const html = await viewerHtml();
+  const files = browser.runtime.getManifest().content_scripts.flatMap(c => c.js).filter(f => f !== 'content.js');
+  const tags = [...new Set(files)].map(f => `<script src="${EXT}${f}"></script>`).join('\n    ');
+  return html.replace('<script src="' + EXT + 'pdfpage.mjs"', tags + '\n    <script src="' + EXT + 'pdfpage.mjs"');
+}
+
+// pdflocal.js: the file the reader handed over (data), or, when the page is
+// opened again (a reload, other settings), whether its bytes are still here.
+export async function local({ data, name }, sender) {
+  const url = sender.url, tabId = sender.tab?.id ?? -1, frameId = sender.frameId ?? 0;
+  if (!url?.startsWith(LOCAL)) return null;
+  let load = [...loads].reverse().find(l => l.url === url && l.tabId === tabId);
+  if (data) {
+    const bytes = new Uint8Array(data);
+    load = { url, tabId, frameId, filename: String(name || 'document.pdf'), length: bytes.byteLength,
+      chunks: [bytes], size: bytes.byteLength, done: true, failed: false, ports: new Set() };
+    loads.push(load);
+    if (loads.length > 20) loads.splice(0, loads.length - 20).forEach(l => l.ports.size || (l.chunks = []));
+  }
+  if (!load || !load.done || !load.size) return null;
+  return localViewerHtml();
+}
+
 // Is this the viewer page served for a PDF at this address, in this tab and frame?
 export function verify(token, sender) {
   if (token !== TOKEN) return false;

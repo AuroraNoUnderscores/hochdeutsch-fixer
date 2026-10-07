@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF</title>
+<link rel="icon" type="image/svg+xml" href="pdfjs/skin/pdf.svg">
+<style>
+  :root { --bg: #f9f9fb; --card: #fff; --fg: #15141a; --muted: #5b5b66; --line: #e0e0e6; --accent: #e2001a; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1b22; --card: #2b2a33; --fg: #fbfbfe; --muted: #a8a8b3; --line: #45444f; } }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  main { width: min(440px, calc(100% - 32px)); padding: 28px 28px 22px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); text-align: center; }
+  h1 { margin: 0 0 6px; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+  p { margin: 0 0 18px; color: var(--muted); }
+  button { font: inherit; font-weight: 600; width: 100%; padding: 10px 14px; border-radius: 8px; border: 0; cursor: pointer;
+           background: var(--accent); color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .drop { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .alt { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; }
+  .alt a { color: var(--muted); }
+  .error { color: var(--accent); margin: 10px 0 0; }
+  body.over main { outline: 2px dashed var(--accent); outline-offset: 6px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main id="ask" hidden>
+  <h1 id="name"></h1>
+  <p>Firefox lets no extension open a file on your computer by itself. Hand this one over once, and it opens converted.</p>
+  <button id="pick" type="button"></button>
+  <div class="drop">or drop the PDF anywhere on this page</div>
+  <p class="error" id="error" hidden>That is not a PDF.</p>
+  <div class="alt"><a href="#" id="original">Show it unconverted in Firefox's viewer</a></div>
+</main>
+<input type="file" id="file" accept=".pdf,application/pdf" hidden>
+<script src="pdflocal.js"></script>
+</body>
+</html>

@@ -2,6 +2,8 @@
 // viewer as a page; here, in that page, this script does what the browser's
 // privileged side normally does for the viewer (preferences, the PDF's bytes,
 // saving), and has the text pdfpage.mjs asks about converted (pdftext.js).
+// For a PDF on this computer it runs as a script of the extension's own page
+// (pdflocal.js), in the viewer's world rather than beside it.
 (() => {
   const root = document.documentElement;
   if (root) { if (root.hasAttribute('data-hdfx-pdf')) main(); return; }
@@ -17,8 +19,8 @@
     const token = root.getAttribute('data-hdfx-pdf');
     // nothing happens here until the background confirms it served this page
     const verified = browser.runtime.sendMessage({ type: 'pdf-verify', token }).catch(() => false);
-    const page = window.wrappedJSObject;
-    const toPage = v => cloneInto(v, window);
+    const page = window.wrappedJSObject || window;
+    const toPage = v => (typeof cloneInto === 'function' ? cloneInto(v, window) : v);
     const fromPage = v => {
       if (v == null || typeof v !== 'object') return v;
       try { return JSON.parse(JSON.stringify(v)); } catch { return null; }   // some messages carry DOM objects
@@ -97,7 +99,7 @@
 
     document.addEventListener('pdf.js.message', async e => {
       if (!(await verified)) return;
-      const raw = e.wrappedJSObject.detail;
+      const raw = (e.wrappedJSObject || e).detail;
       const action = raw?.action, responseExpected = !!raw?.responseExpected;
       if (!(action in ACTIONS) && !responseExpected) return;   // telemetry, find bar and editor state updates
       const data = fromPage(raw?.data);
@@ -173,6 +175,11 @@
       if (started) return;
       if (!info) { viewerWaiting = true; return; }
       started = true;
+      if (info.missing && location.protocol === 'moz-extension:') {
+        // a PDF from this computer: only the reader can hand it over again (pdflocal.js)
+        location.reload();
+        return;
+      }
       if (info.missing) {
         // The bytes are gone (the extension was reloaded): fetch the PDF again.
         fetch(location.href, { credentials: 'include' }).then(r => r.arrayBuffer()).then(buf => {
