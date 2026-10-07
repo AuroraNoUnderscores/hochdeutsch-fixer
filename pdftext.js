@@ -234,7 +234,7 @@ globalThis.HD_PDFTEXT = (() => {
     };
   }
 
-  function reflow(items, { para }, text, column, open) {
+  function reflow(items, { para, text: was }, text, column, open) {
     const lines = para.map(l => l.filter(i => items[i].str.trim())).filter(l => l.length);
     if (!lines.length) return null;
     const its = lines.flat().map(i => items[i]);
@@ -254,8 +254,36 @@ globalThis.HD_PDFTEXT = (() => {
     const right = Math.max(...geo.map(g => g.x1));
     const justified = geo.length > 1 && geo.slice(0, -1).every(g => right - g.x1 < 2);
     const words = text.trim().split(/\s+/);
+    // Which of the new words are changed ones, and where they are in a line of
+    // words a to b, for the highlights; neighbours are one mark with their space.
+    let delta = 0;
+    const spans = differences(was, text).map(d => { const s = d.s + delta; delta += d.t.length - (d.e - d.s); return [s, s + d.t.length]; });
+    const changed = [...text.matchAll(/\S+/g)].map(m => {
+      const on = spans.filter(([a, b]) => a < m.index + m[0].length && b > m.index);
+      return on.length ? [Math.max(0, on[0][0] - m.index), Math.min(m[0].length, on[on.length - 1][1] - m.index)] : null;
+    });
+    const marks = (a, b) => {
+      const out = [];
+      for (let n = a, at = 0; n < b; at += words[n++].length + 1) {
+        if (!changed[n]) continue;
+        const [lo, hi] = changed[n], last = out[out.length - 1];
+        if (last && lo === 0 && last[1] === at - 1) last[1] = at + hi; else out.push([at + lo, at + hi]);
+      }
+      return out;
+    };
+    // Where a line's words a to b are set, as the canvas sets them (pdfhooks.mjs):
+    // [x from the line's start, width] each; justified to a width, or as they
+    // come, narrowed to fit cap. For the text layer, word by word.
+    const place = (a, b, justify, cap) => {
+      if (b - a < 2) return undefined;
+      const ws = words.slice(a, b).map(width), sum = ws.reduce((p, q) => p + q, 0);
+      const gap = justify ? (justify - sum) / (ws.length - 1) : space;
+      const k = !justify && sum + gap * (ws.length - 1) > cap ? cap / (sum + gap * (ws.length - 1)) : 1;
+      let x = 0;
+      return ws.map(wd => { const at = x; x += (wd + gap) * k; return [+at.toFixed(2), +(wd * k).toFixed(2)]; });
+    };
     const fill = (cap, last) => {
-      const take = [];
+      const take = [], from = w;
       let used = 0;
       while (w < words.length) {
         const add = width(words[w]) + (take.length ? space * (justified ? 0.85 : 1) : 0);
@@ -263,7 +291,7 @@ globalThis.HD_PDFTEXT = (() => {
         take.push(words[w++]);
         used += add;
       }
-      return { text: take.join(' '), used };
+      return { text: take.join(' '), used, from, to: w };
     };
     let w = 0;
     const own = new Set(lines.flat());
@@ -272,8 +300,8 @@ globalThis.HD_PDFTEXT = (() => {
       const last = n === geo.length - 1;
       const edge = geo.length === 1 && open ? Math.max(column(g.x0), open(g, own, size)) : column(g.x0);
       const cap = justified && !last ? g.x1 - g.x0 : edge - g.x0;
-      const { text: t } = fill(cap, false);
-      return { line: n, text: t, justify: justified && !last, width: g.x1 - g.x0, cap };
+      const { text: t, from, to } = fill(cap, false);
+      return { line: n, text: t, from, to, justify: justified && !last, width: g.x1 - g.x0, cap };
     });
     // Words left over: the paragraph needs more lines. They go below it if
     // nothing else is there (and the overflow is worth a line); otherwise the
@@ -288,7 +316,7 @@ globalThis.HD_PDFTEXT = (() => {
         && it.t[5] < lastGeo.y - 0.5 && it.t[5] > lastGeo.y - leading * (n + 0.6)
         && it.t[4] < lastGeo.x0 + cap && it.t[4] + it.w > lastGeo.x0);
       const lines2 = [];
-      let left = words.slice(w);
+      let left = words.slice(w), at = w;
       while (left.length) {
         const take = [];
         let used = 0;
@@ -297,25 +325,28 @@ globalThis.HD_PDFTEXT = (() => {
           if (take.length && used + add > cap) break;
           take.push(left.shift()); used += add;
         }
-        lines2.push(take.join(' '));
+        lines2.push({ text: take.join(' '), marks: marks(at, at + take.length), xs: place(at, at + take.length, null, cap) });
+        at += take.length;
       }
       if (width(rest) > cap * 0.03 && free(lines2.length)) {
         // the old last line is now a full line of the paragraph
         // (justified, it is as wide as the paragraph's other lines, not as it was)
         if (justified || geo.length === 1) Object.assign(lastOut, { justify: justified, ...(justified ? { width: right - lastGeo.x0 } : {}) });
-        lines2.forEach((t, n) => more.push({ dy: -leading * (n + 1), text: t, cap }));
+        lines2.forEach((l, n) => more.push({ dy: -leading * (n + 1), ...l, cap }));
       } else {
         lastOut.text = [lastOut.text, rest].filter(Boolean).join(' ');
+        lastOut.to = words.length;
       }
     }
     const edits = [];
-    out.forEach(({ line, text: t, justify, width: lw, cap }, n) => {
+    out.forEach(({ line, text: t, from, to, justify, width: lw, cap }, n) => {
       const l = lines[line];
       const orig = l.map(i => items[i].str).join(' ').replace(/\s+/g, ' ').trim();
       const extra = n === out.length - 1 && more.length ? more : null;
       if (orig === t && !extra) return;             // this line reads as before
+      const xs = place(from, to, justify ? lw : null, cap);
       l.forEach((i, j) => edits.push(j === 0
-        ? { i, s: 0, e: items[i].str.length, t, line: { justify, width: lw, cap, ...(extra ? { more: extra } : {}) }, of: l[0] }
+        ? { i, s: 0, e: items[i].str.length, t, marks: marks(from, to), line: { justify, width: lw, cap, ...(xs ? { xs } : {}), ...(extra ? { more: extra } : {}) }, of: l[0] }
         : { i, s: 0, e: items[i].str.length, t: '', of: l[0] }));
     });
     return edits;
@@ -393,5 +424,13 @@ globalThis.HD_PDFTEXT = (() => {
     }).catch(() => {});
   }
 
-  return { convertPage, remember, status: () => ({ count, mode: settings?.mode || 'hamburg' }) };
+  // "Highlight changes on page", for the viewer (pdfhooks.mjs), live: it tints
+  // the changed words while the page's <html> carries data-hdfx-highlight.
+  function highlights() {
+    const set = on => document.documentElement.toggleAttribute('data-hdfx-highlight', !!on);
+    browser.storage.local.get('highlight').then(s => set(s.highlight), () => {});
+    browser.storage.onChanged.addListener((ch, area) => { if (area === 'local' && 'highlight' in ch) set(ch.highlight.newValue); });
+  }
+
+  return { convertPage, remember, highlights, status: () => ({ count, mode: settings?.mode || 'hamburg' }) };
 })();

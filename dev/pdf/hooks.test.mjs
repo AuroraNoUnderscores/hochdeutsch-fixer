@@ -5,6 +5,7 @@
 const listeners = {};
 let answer = null;
 globalThis.document = {
+  documentElement: { hasAttribute: () => false },
   addEventListener: (type, fn) => (listeners[type] ||= []).push(fn),
   dispatchEvent: e => {
     if (e.type !== 'hdfx-pdf-req') return;
@@ -12,6 +13,7 @@ globalThis.document = {
     for (const fn of listeners['hdfx-pdf-res'] || []) fn({ detail: JSON.stringify({ id, data: answer }) });
   },
 };
+globalThis.MutationObserver = class { observe() {} };
 globalThis.CustomEvent = class { constructor(type, o) { this.type = type; this.detail = o?.detail; } };
 globalThis.OffscreenCanvas = class { getContext() { return { font: '', measureText: t => ({ width: t.length * 50 }) }; } };
 const { prepare, canvas } = await import('../../pdfhooks.mjs');

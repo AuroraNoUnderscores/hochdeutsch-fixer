@@ -7,7 +7,7 @@
 //   pdfview.js (the content script) for the page's converted text, then swaps
 //   the glyphs of changed words as they are drawn and the words in the text
 //   layer used for selecting, copying and finding.
-import { textStream, onRedraw } from './pdfhooks.mjs';
+import { textStream, onRedraw, highlightLayer } from './pdfhooks.mjs';
 
 const BASE = new URL('pdfjs/', import.meta.url).href;
 globalThis.__hdfxBase = BASE;
@@ -371,6 +371,7 @@ function dropFindLayers() {
   const bus = app.eventBus;
   bus.on('pagesloaded', queueAll);
   bus.on('textlayerrendered', ({ pageNumber, source }) => {
+    if (source?.textLayer?.div) highlightLayer(source.textLayer.div, pageNumber - 1);
     const ours = findLayers.get(pageNumber - 1);
     if (!ours) return;
     const theirs = source?.textLayer?.div;
