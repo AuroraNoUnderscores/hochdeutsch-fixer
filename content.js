@@ -185,9 +185,12 @@
       return by + list;
     }
     if (from.replace(/ss/g, 'ß') === to || to.replace(/ß/g, 'ss') === from) return 'Swiss spelling: ss → ß';
+    // Hamburg only where the flavour itself makes the difference: the words
+    // alone, converted both ways (in context the rest may differ for other reasons)
     if (mode === 'hamburg') {
       const neutral = E.convert(from, { mode: 'neutral' }).text;
-      if (neutral !== to) return neutral === from ? 'Hamburg flavour' : `Hamburg flavour (Neutral: „${neutral}“)`;
+      if (neutral !== E.convert(from, { mode: 'hamburg' }).text)
+        return neutral === from ? 'Hamburg flavour' : `Hamburg flavour (Neutral: „${neutral}“)`;
     }
     return /\s/.test(from) || /\s/.test(to) ? 'Swiss usage' : 'Swiss word';
   }
@@ -235,7 +238,7 @@
     style.textContent = `
       :host { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.12); --mark: #e8a200; }
       @media (prefers-color-scheme: dark) { :host { --bg: #2b2a33; --fg: #fbfbfe; --muted: #a8a8b3; --line: rgba(255,255,255,.14); --mark: #ffc845; } }
-      .card { position: fixed; left: 0; top: 0; max-width: 300px; box-sizing: border-box; padding: 7px 10px 8px;
+      .card { position: fixed; left: 0; top: 0; max-width: min(320px, calc(100vw - 12px)); box-sizing: border-box; padding: 7px 10px 8px;
         font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg);
         border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 6px 20px rgba(0,0,0,.14), 0 1px 3px rgba(0,0,0,.08);
         opacity: 0; transform: translate3d(var(--x, 0), calc(var(--y, 0) + var(--dy, 4px)), 0);
@@ -244,26 +247,29 @@
       .card.below { --dy: -4px; }
       .card.on.below { --dy: 0px; }
       .card.still { transition: none; }
-      .row { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
-      .from { position: relative; color: var(--muted); }
-      .from::after { content: ''; position: absolute; left: -1px; right: -1px; top: 54%; height: 1.5px; border-radius: 1px;
-        background: currentColor; transform: scaleX(1); transform-origin: left center; }
-      .card.fresh .from::after { animation: strike 220ms 70ms cubic-bezier(.4,0,.2,1) both; }
-      @keyframes strike { from { transform: scaleX(0); } }
-      .arrow { color: var(--muted); font-size: 12px; }
-      .to { font-weight: 600; box-shadow: inset 0 -2px 0 var(--mark); }
+      .row { hyphens: auto; overflow-wrap: anywhere; }
+      /* strike and underline as backgrounds, cloned onto every line a long word wraps to */
+      .from, .to { -webkit-box-decoration-break: clone; box-decoration-break: clone; background-repeat: no-repeat; }
+      .from { color: var(--muted); background-image: linear-gradient(currentColor, currentColor);
+        background-position: 0 56%; background-size: 100% 1.5px; }
+      .card.fresh .from { animation: strike 220ms 70ms cubic-bezier(.4,0,.2,1) both; }
+      @keyframes strike { from { background-size: 0% 1.5px; } }
+      .arrow { color: var(--muted); font-size: 12px; margin: 0 2px 0 5px; }
+      .to { font-weight: 600; padding-bottom: 1px; background-image: linear-gradient(var(--mark), var(--mark));
+        background-position: 0 100%; background-size: 100% 2px; }
       .row.kept .from, .row.kept .arrow { display: none; }
-      .row.kept .to { box-shadow: none; text-decoration: underline dotted #0a84ff 2px; text-underline-offset: 3px; }
-      .note { margin-top: 3px; font-size: 11.5px; color: var(--muted); white-space: normal; }
+      .row.kept .to { background: none; text-decoration: underline dotted #0a84ff 2px; text-underline-offset: 3px; }
+      .note { margin-top: 3px; font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
       @media (prefers-reduced-motion: reduce) {
         .card { transition: opacity 100ms linear; transform: translate3d(var(--x, 0), var(--y, 0), 0); }
-        .card.fresh .from::after { animation: none; }
+        .card.fresh .from { animation: none; }
       }`;
     const card = el('div', 'card', root);
     card.setAttribute('role', 'tooltip');
+    card.lang = 'de';                          // German hyphenation for long compounds
     const row = el('div', 'row', card);
     const from = el('span', 'from', row);
-    el('span', 'arrow', row).textContent = '→';
+    el('span', 'arrow', row).textContent = '→\u00a0';   // the arrow stays with the new word
     const to = el('span', 'to', row);
     const note = el('div', 'note', card);
     document.documentElement.append(host);
