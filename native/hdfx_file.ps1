@@ -7,7 +7,7 @@
 # Firefox's native messaging: each message is a 32-bit length in the
 # machine's byte order, then that many bytes of JSON. In: {"path": base64 of
 # the path}. Out: {"chunk": base64} per 512 KiB (a message to the extension
-# may be at most 1 MB), then {"done": true}; or {"error": "..."}.
+# may be at most 1 MB), then {"done": true, "size": bytes}; or {"error": "..."}.
 # Written for Windows PowerShell 5.1, which every Windows 10 and 11 has.
 $ErrorActionPreference = 'Stop'
 $stdin = [Console]::OpenStandardInput()
@@ -51,5 +51,5 @@ try {
   while (($n = $file.Read($buf, 0, $buf.Length)) -gt 0) {
     Send ('{"chunk":"' + [Convert]::ToBase64String($buf, 0, $n) + '"}')
   }
-  Send '{"done":true}'
+  Send ('{"done":true,"size":' + $file.Length + '}')
 } finally { $file.Dispose() }

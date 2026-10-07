@@ -54,7 +54,7 @@ static class HdfxFile {
       var buf = new byte[524288];
       while ((n = file.Read(buf, 0, buf.Length)) > 0)
         Send("{\"chunk\":\"" + Convert.ToBase64String(buf, 0, n) + "\"}");
-      Send("{\"done\":true}");
+      Send("{\"done\":true,\"size\":" + file.Length + "}");
     }
     return 0;
   }
