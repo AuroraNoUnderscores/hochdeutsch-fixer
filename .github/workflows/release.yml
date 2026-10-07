@@ -1,0 +1,73 @@
+# Signs each new version with Mozilla (unlisted, so not in the store) and
+# publishes it as a GitHub Release. Firefox finds it through updates.json
+# (the update_url in manifest.json) and updates the installed add-on itself.
+# Runs on every push to main; a version that already has a release is skipped.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version manifest.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already released"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.v.outputs.new == 'true'
+        with:
+          node-version: 22
+
+      - name: Sign with Mozilla
+        if: steps.v.outputs.new == 'true'
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        # The same files as a hand-made zip: what the extension never loads stays out.
+        run: |
+          npx --yes web-ext@10.7.0 sign --channel=unlisted \
+            --source-dir . --artifacts-dir signed --approval-timeout 1800000 \
+            --ignore-files .github dev training tools native CLAUDE.md README.md updates.json signed
+          mv signed/*.xpi "hochdeutsch-fixer-${{ steps.v.outputs.version }}.xpi"
+
+      - name: Publish the release and point updates.json at it
+        if: steps.v.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          xpi="hochdeutsch-fixer-$VERSION.xpi"
+          gh release create "v$VERSION" "$xpi" --title "v$VERSION" --notes "Install: open $xpi in Firefox. Later versions arrive by themselves."
+          id=$(jq -r .browser_specific_settings.gecko.id manifest.json)
+          link="https://github.com/${{ github.repository }}/releases/download/v$VERSION/$xpi"
+          jq -n --arg id "$id" --arg v "$VERSION" --arg link "$link" \
+            '{addons: {($id): {updates: [{version: $v, update_link: $link}]}}}' > updates.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add updates.json
+          git commit -m "updates.json: v$VERSION"
+          git pull --rebase origin main
+          git push origin HEAD:main

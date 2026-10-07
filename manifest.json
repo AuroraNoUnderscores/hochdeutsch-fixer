@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Hochdeutsch-Fixer",
-  "version": "3.6.7",
+  "version": "3.6.8",
   "description": "Replaces Swiss Standard German (Velo, parkieren, Spass …) with German Standard German, with a Hamburg flavour and a local baby LLM for the tricky calls.",
   "icons": {
     "48": "icon.svg",
@@ -59,6 +59,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "hochdeutsch-fixer@addons.local",
+      "update_url": "https://raw.githubusercontent.com/AuroraNoUnderscores/hochdeutsch-fixer/main/updates.json",
       "strict_min_version": "115.0",
       "data_collection_permissions": {
         "required": [
