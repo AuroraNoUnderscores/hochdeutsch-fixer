@@ -36,11 +36,16 @@ On sentences from articles nobody tuned anything on, hand-written ss/ß rules go
 28.8 of every 1000 decisions wrong. The eszett model is trained on 23 million
 sentences whose correct spelling came for free (turn every ß into ss, and the
 original is the answer): German Wikipedia plus everyday German from the web,
-cleaned of Swiss and misspelt pages. On held-out web text it gets 3.98 of 1000
-wrong, on held-out Wikipedia 5.66, including the collisions a list cannot settle:
-*die Masse strömte* vs *die Maße des Fensters*, *ein Ass* vs *ich aß*, *keine
-Busse fahren* vs *eine Buße zahlen*. Wikipedia alone was not enough: an
-encyclopedia hardly ever takes the measurements of a window.
+cleaned of Swiss and misspelt pages. On held-out web text it gets 3.67 of 1000
+wrong, including the collisions a list cannot settle: *die Masse strömte* vs *die
+Maße des Fensters*, *ein Ass* vs *ich aß*, *keine Busse fahren* vs *eine Buße
+zahlen*. Wikipedia alone was not enough: an encyclopedia hardly ever takes the
+measurements of a window.
+
+It is also trained on German sentences inside real Swiss paragraphs, so a
+Swiss-sounding page ("Das Kantonsspital Winterthur ...") does not make it keep
+"Grosse Teile", and on fines as Swiss text writes them ("muss eine Busse von 40
+Franken bezahlen"), which German text hardly ever does.
 
 The rules' answer only stands where the model is unsure (probability between 0.4
 and 0.6), and a topic cue only outranks it for a spelling the model barely saw in
@@ -164,6 +169,60 @@ preposition before a changed article where German contracts it ("in der Offerte"
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
 | Pronouns after a gender change ("Er war knapp" → "Sie war knapp") | rules | German pronouns agree with their antecedent; the model has no idea. Never in the noun's own clause ("Wegen dem Entscheid ärgert er sich" is a person), never the polite "Sie" |
 
+## PDFs
+
+PDFs are converted too, in the browser's own PDF viewer, and that viewer looks
+and behaves exactly as before: same address, same toolbar, same zoom, find,
+print, save and thumbnails. With nothing to convert (an English PDF), a
+screenshot of the extension's viewer is identical to the built-in one, pixel for
+pixel, and so is every computed style of its toolbar (`tools/pdf_check.py`).
+
+How, since no extension can reach the built-in viewer:
+
+1. **The same viewer, served by the extension.** `tools/sync_pdfjs.py` copies the
+   browser's own viewer (pdf.js, its styles, its strings in every language) out
+   of the installed browser into `pdfjs/`, so it is the same version, and settles
+   what only the browser's own pages may use (`-moz-pref()` conditions, platform
+   styles) from the browser's default settings. Rerun it after a browser update,
+   or the viewer lags behind the browser's until then.
+2. **At the PDF's own address.** `pdfnet.js` answers a PDF response (tabs,
+   frames, `<embed>`, `<object>`) with that viewer as a page instead, keeps the
+   PDF's bytes and streams them to it as they arrive, the way the browser does,
+   so the first page appears before a large file has finished downloading.
+3. **What the browser does for its viewer** (preferences, the PDF's bytes,
+   saving, its strings) is done by `pdfview.js`, answering the viewer's requests
+   the way the browser would, with the browser's default `pdfjs.*` settings.
+4. **The text.** `pdfview.js` joins each page's lines into paragraphs (a word
+   hyphenated at a line end is one word), converts them like any page, model
+   included, and maps the changes back onto the fragments pdf.js draws. Three
+   small hooks in pdf.js (`pdfpage.mjs`) then draw the new words with the
+   document's own glyphs, give them to the text layer for selecting, copying and
+   finding, and do the same when printing.
+
+A changed word is drawn in the document's own font. A letter the document's
+font does not contain (a Swiss document never contains ß) comes from the
+installed font of the same family and weight (Arial Bold for "Arial-BoldMT"),
+otherwise from the generic family pdf.js names for that font.
+
+Words of other lengths would leave lines squeezed or gappy, so a changed
+paragraph is typeset again: its words are broken into its lines anew, each as
+wide as before, justified lines stay justified, ragged ones may run to the
+column's edge, and a paragraph that grew takes another line below it when the
+space there is free. Paragraphs mixing fonts (a bold word inside) or with
+centred or indented lines keep their lines: a longer word there may use the free
+space at the end of its line, then narrows the word gaps, and only then is
+squeezed.
+
+The browser's find bar searches the converted text, also on pages pdf.js has not
+drawn yet (each gets its text in an invisible layer, which hands a match over to
+pdf.js's own when the page is drawn). A page that only pretends to be the viewer
+gets nothing: the viewer page carries a token, and the background answers only
+pages it actually served for a PDF at that address.
+
+Measured on real documents (federal guidelines, cantonal forms, an ETH safety
+manual of 132 pages): first page on screen after 0.45 s instead of 0.30 s, the
+difference being the conversion.
+
 ## Settings (toolbar popup)
 
 - **Enabled**, and a per-site switch. Turning it off restores the page without a reload.
@@ -176,6 +235,7 @@ preposition before a changed article where German contracts it ("in der Offerte"
   highlights, so the page's markup is not touched.
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
+- **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.
 
 ## Adding words
 
@@ -218,7 +278,7 @@ browser may cache scripts between edits, so reload hard):
 - `test.html` — rules only, no model, 160 cases.
 - `dev/real.html` — for the *installed* extension, nothing stubbed: the 44 notes
   of the answer key as a plain page, graded after 20 s (`?wait=`). The Firefox
-  build, installed into a fresh Firefox-engine profile, scores 42/44 there, the
+  build, installed into a fresh Firefox-engine profile, scores 43/44 there, the
   same as `dev/key.html`.
 - `dev/swiss.html` — the engine on real sentences from .ch pages
   (`training/data/names/ch.jsonl`), before and after, for reading; `?base=old`
@@ -247,6 +307,12 @@ browser may cache scripts between edits, so reload hard):
 - `dev/frames.html` — a page of short notes inside a sandboxed `srcdoc`
   iframe, the shape artifacts and embedded readers use.
 - `dev/debug.html` — prints raw scores for candidate sentences.
+
+- `tools/pdf_check.py` — PDFs end to end in a headless browser with the extension
+  installed (`tools/zen.py`): pixel and style parity with the built-in viewer,
+  converted text on screen and in the text layer, find on every page, PDFs in
+  iframes, `<embed>` and `<object>`, saving, and a page posing as the viewer.
+  Test PDFs in `dev/pdf/` (`dev/pdf/make.py`, PyMuPDF).
 
 `test.js` also runs under `node test.js` if Node is available.
 
@@ -283,6 +349,15 @@ browser may cache scripts between edits, so reload hard):
   capitalised and a past tense is not, so mid-sentence "Ass" stays an ace while
   "ass" becomes "aß", and "Schoss" becomes "Schoß" while "schoss" stays.
 
+- PDFs the browser opens from disk (`file://`), or that a page builds itself
+  (`blob:`, `data:`), never pass the network, so the extension never sees them:
+  they open in the browser's viewer, unconverted.
+- In a PDF, the find bar highlights a match the way it does on any page, not with
+  the viewer's own highlight, which the browser draws only for its own viewer.
+- The viewer is the browser's version when `tools/sync_pdfjs.py` last ran.
+- A model decision that comes after a page was drawn (the first page, while the
+  model is still loading) redraws that page once.
+
 - The model is small. It is good at spelling, articles and word choice in a
   sentence, and knows nothing about the world beyond that.
 - The language-page detection is deliberately eager: a page that discusses
@@ -294,10 +369,8 @@ browser may cache scripts between edits, so reload hard):
   moment before the model puts a name back.
 - Name misses: brand names built from Swiss words (VeloStrom, "Velo Pro") and
   names with a letter or number ("Natel A") can still be rewritten. On a
-  hand-labelled sample the model kept 21 of 30 such names and never kept an
+  hand-labelled sample the model kept 20 of 30 such names and never kept an
   ordinary word.
-- The model reads a paragraph at once. That usually helps, but in the long test
-  note "die Masse der Zuschauer" early on pulls "die Masse meines Koffers" later
-  to the crowd sense; and "Herzlichen Gruss aus Zürich" stays Gruss, because web
-  pages write "Gruss" often enough to muddle the labels. 42 of the 44 test notes
-  match their answer key.
+- "Herzlichen Gruss aus Zürich" stays Gruss, because web pages write "Gruss"
+  often enough to muddle the labels. 43 of the 44 test notes match their answer
+  key. Buses in a sentence about fines ("25 Euro für Busse") can become fines.

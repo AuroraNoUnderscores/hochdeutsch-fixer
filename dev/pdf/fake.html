@@ -1,0 +1,18 @@
+<!doctype html>
+<html data-hdfx-pdf="made-up">
+<meta charset="utf-8">
+<title>waiting</title>
+<body>
+<script>
+  // A page posing as the extension's PDF viewer: it must get no answer
+  // (tools/pdf_check.py).
+  const node = document.createTextNode('');
+  document.documentElement.append(node);
+  node.addEventListener('pdf.js.response', () => { document.title = 'answered'; });
+  setTimeout(() => {
+    node.dispatchEvent(new CustomEvent('pdf.js.message', { bubbles: true, detail: { action: 'getPreferences', data: { sidebarViewOnLoad: 0 }, responseExpected: true } }));
+  }, 500);
+  setTimeout(() => { if (document.title === 'waiting') document.title = 'no answer'; }, 2500);
+</script>
+</body>
+</html>

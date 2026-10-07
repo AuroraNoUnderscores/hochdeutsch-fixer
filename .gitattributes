@@ -1,2 +1,5 @@
 # model files must reach the browser byte for byte
 models/** -text
+# the browser's PDF viewer, copied by tools/sync_pdfjs.py, and the test PDFs
+pdfjs/** -text
+dev/pdf/*.pdf -text

@@ -39,7 +39,10 @@ A wrong spelling in the source is a wrong label, and German web pages write
   decides what is settled: a form written one way at least 97% of the time in 30+
   occurrences (Straße, Fußball, heißt; dass, muss). This catches Swiss spelling,
   spelling before 1996 and typos, without a hand-written list, and forms with two
-  real spellings (Masse/Maße, Weiss the name) are never settled.
+  real spellings (Masse/Maße, Weiss the name) are mostly never settled. One
+  slipped through: Wikipedia writes "Bussen" (buses) so much more often than
+  "Bußen" (fines) that it counts as settled on ss, which drops every page that
+  fines in the plural; `senses.py` (below) puts fines back.
 
 Train, validation and test are split by website, so no site is in two of them.
 
@@ -56,6 +59,25 @@ with 0.99, "Hoi Anna" a two-word name. `names_swap.py` fixes that with data:
 3. the Swiss word replaces the German one, the sentence goes into Swiss spelling,
    and the labels carry over: 351k sentences, 6.4M labelled words.
 
+### Swiss context, and fines
+
+The extension asks the model about Swiss paragraphs, and some Swiss writing
+slipped into the German web data. The model had learnt that a Swiss-sounding
+text keeps its ss: "Grosse Teile des Spitals" got 0.997 for ß alone and 0.24
+after "Das Kantonsspital Winterthur hat ... eröffnet." `swissctx.py` builds 3M
+rows of one to three real .ch sentences around one German sentence, with only
+the German sentence's ss labelled, so Swiss context says nothing about German
+spelling.
+
+"Busse" was the other way round: German says Bußgeld, Strafe or
+Verwarnungsgeld for a fine and keeps Buße mostly for the church, so next to
+traffic words the model read a Swiss fine as buses ("Wer falsch parkiert, muss
+eine Busse von 40 Franken bezahlen" stayed ss). `senses.py` takes German
+sentences that fine with Strafe (where money is in the sentence) or Bußgeld
+(where the article shows the case) and puts Buße in their place: 7k sentences,
+alone or in Swiss context, next to the web's 16k sentences with real buses. With
+fines alone, the model began to fine the buses (41 errors per 1000 on them).
+
 ## Pipeline
 
 | step | script |
@@ -66,9 +88,13 @@ with 0.99, "Hoi Anna" a two-word name. `names_swap.py` fixes that with data:
 | where the dictionary's Swiss words occur on .de and .ch pages | `names_extract.py` |
 | swapped, judged sentences for names | `names_swap.py collect`, `names_swap.py label <judge>` |
 | dictionary words that are also ordinary German → `../german_too.js` | `german_too.py` |
+| German sentences inside .ch sentences | `swissctx.py extract`, `swissctx.py build` |
+| Buße as a fine, beside the buses | `senses.py extract` |
 | multi-sentence passages (tried, not shipped) | `para.py` |
 | training | `train2.py` |
-| ss/ß grading | `evaluate2.py` |
+| ss/ß grading | `evaluate2.py`; alone, in Swiss context, fines and buses: `evalctx.py` |
+| where two models disagree, by word | `diffmodels.py` |
+| one text's ss and names, as the model sees them | `probe.py` |
 | names grading | `names_eval.py` |
 | ONNX export, per-channel int8, re-graded | `export.py` |
 | training counts for topic cues → `../coverage.js` | `coverage.py` |
@@ -85,18 +111,33 @@ only forms with two real spellings (both at least 10 times and 3% in training).
 | --- | --- | --- | --- | --- | --- | --- |
 | v3.0, Wikipedia only | 8.54 | 79.4 | 8.26 | 82.0 | 9.26 | 39/40 |
 | + 4M web sentences | 6.43 | 74.8 | 4.24 | 60.9 | – | 39/40 |
-| **all 22M web sentences + names (shipped)** | **5.66** | **58.4** | **3.98** | **57.4** | **3.98** | 38/40 |
+| all 22M web sentences + names (v3.1–3.4) | 5.66 | 58.4 | 3.98 | 57.4 | 3.98 | 38/40 |
 | + passage training | 6.62 | 77.1 | 3.83 | 56.2 | 4.02 | 38/40 |
 
-int8 costs 0.2 per 1000 (8.18 → 8.37 on the original Wikipedia test).
+From v3.5 on, graded with `evalctx.py` (20k held-out sentences per set), and the
+whole extension in the browser:
 
-Names: GermEval test F1 0.913. On a hand-labelled random sample of 197 Swiss
-dictionary words found on .de and .ch pages (`data/names/hand_sample.json`, 30
-of them part of a name, never trained on): the model never kept an ordinary word
-as a name (precision 1.00) and kept 21 of 30 names. The ones it misses are brand
+| model | web | Wikipedia | web in Swiss context | fines | buses | answer key | held-out web, whole engine |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v3.4 | 4.00 | 5.70 | 5.22 | 315.9 | 4.6 | 42/44 | 4.72 |
+| + Swiss context | 3.78 | 6.47 | 4.81 | 307.2 | 0.0 | – | – |
+| **+ fines and buses (shipped)** | **3.67** | 7.15 | **4.73** | **15.5** | 18.4 | **43/44** | **3.97** |
+
+The Wikipedia errors it adds are almost all surnames (Jürss, Weiss, Krauss),
+which the extension keeps as names anyway; the buses it gets wrong are buses in
+sentences about fines ("25 Euro für Busse").
+
+int8 costs 0.1 to 0.2 per 1000 (8.18 → 8.37 on the original Wikipedia test for
+the first model, 9.70 → 9.80 for v3.5).
+
+Names: GermEval test F1 0.914 (v3.4: 0.913). On a hand-labelled random sample
+of 197 Swiss dictionary words found on .de and .ch pages
+(`data/names/hand_sample.json`, 30 of them part of a name, never trained on):
+the model never kept an ordinary word as a name (precision 1.00) and kept 20 of
+30 names (v3.4: 21). The ones it misses are brand
 names built from Swiss words (VeloStrom, Velositey, "Velo Pro"), names with a
 letter or number ("Natel A") and a gold corridor called Perron. Of the Swiss
-words on .ch pages, 4.0% are kept as names.
+words on .ch pages, 2.9% are kept as names (v3.4: 4.0%).
 
 ## Things measured on the way, so they need not be rediscovered
 
@@ -148,11 +189,16 @@ $P names_extract.py <that parquet path>         # also used by german_too.py and
 $P train2.py --web 20000 --wiki 5000 --no-balance --ner --ner-every 1 --epochs 5.8 --out runs/names-judge
 $P names_swap.py collect && $P names_swap.py label runs/names-judge/best
 $P train2.py --no-balance --ner --swap --swap-name-repeat 1 --ner-every 80 --eval-every 50000 --out runs/full-names
-$P evaluate2.py runs/full-names/best && $P names_eval.py runs/full-names/best
-$P export.py runs/full-names/best && cp -r export/hdfx-eszett ../models/
+$P swissctx.py extract <that parquet path>      # .ch sentences
+$P train2.py --no-balance --ner --swap --swap-name-repeat 1 --ner-every 80 --eval-every 50000   --swissctx 3000000 --out runs/v4-swissctx
+$P senses.py extract <that parquet path>        # fines
+$P train2.py --no-balance --ner --swap --swap-name-repeat 1 --ner-every 80 --eval-every 20000   --swissctx 3000000 --senses 200000 --init runs/v4-swissctx/best --lr 2e-5 --epochs 0.15 --out runs/v6-senses
+$P evalctx.py runs/v6-senses/best && $P names_eval.py runs/v6-senses/best
+$P export.py runs/v6-senses/best && cp -r export/hdfx-eszett ../models/
 $P coverage.py && $P german_too.py
 ```
 
-The full run takes about 3.5 hours on an RX 9070 XT. Hugging Face's `Trainer`
+The full run takes about 3.5 hours on an RX 9070 XT, the Swiss-context run 5.5
+hours more, the fines 50 minutes. Hugging Face's `Trainer`
 is not used because AMD's Windows torch has no `torch.distributed`, which it
 imports unconditionally.

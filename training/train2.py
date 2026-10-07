@@ -11,6 +11,8 @@ organisation, place or other name. A batch of names joins the ss/ß batch every
 --ner-every steps, so both jobs share one encoder and one pass in the browser.
 With --swap, batches of web sentences whose German noun was replaced by its Swiss
 synonym (names_swap.py) join too, so Swiss words are not mistaken for names.
+--swissctx and --senses add rows of German sentences in Swiss context
+(swissctx.py) and of Buße as a fine (senses.py).
 """
 import argparse, json, math, os, random, time
 from pathlib import Path
@@ -25,6 +27,8 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer, get_lin
 
 import data_v2 as D
 import names_data as N
+import swissctx as C
+import senses as S
 
 
 @torch.no_grad()
@@ -65,6 +69,8 @@ def main():
     ap.add_argument("--swap-name-repeat", type=int, default=10)
     ap.add_argument("--para", type=int, default=0, help="also this many multi-sentence web passages (para.py)")
     ap.add_argument("--init", help="continue from this checkpoint instead of the base model")
+    ap.add_argument("--swissctx", type=int, default=0, help="also this many web sentences inside Swiss context (swissctx.py)")
+    ap.add_argument("--senses", type=int, default=0, help="also this many rows of rare ß senses, e.g. Buße as a fine (senses.py)")
     args = ap.parse_args()
 
     torch.manual_seed(7); random.seed(7)
@@ -82,6 +88,13 @@ def main():
         # passages of consecutive sentences, as the extension reads a page
         train.append(D.Tokenized(D.build(args.base, "train_webpara", args.para, None, max_len=384)))
         val["val_webpara"] = D.Tokenized(D.build(args.base, "val_webpara", 3000, None, max_len=384))
+    if args.swissctx:
+        # German sentences inside sentences from .ch pages, as the extension asks
+        train.append(D.Tokenized(C.build(args.base, "train", args.swissctx)))
+        val["val_swissctx"] = D.Tokenized(C.build(args.base, "val", 8000))
+    if args.senses:
+        # Buße as a fine, which German web text hardly has and Swiss text has all the time
+        train.append(D.Tokenized(S.build(args.base, "train", args.senses)))
     if args.tokenize_only:
         return
 
@@ -152,6 +165,7 @@ def main():
             (out / "best" / "val.json").write_text(json.dumps(m, indent=2))
         print(f"step {step}/{steps} VAL wiki {m['val_wiki']:.2f} web {m['val_web']:.2f} "
               + (f"passages {m['val_webpara']:.2f} " if "val_webpara" in m else "")
+              + (f"swiss context {m['val_swissctx']:.2f} " if "val_swissctx" in m else "")
               + 
               f"mean {m['mean']:.2f} errors/1000"
               + (f" | names F1 {m['names']['f1']:.3f} (P {m['names']['precision']:.3f} R {m['names']['recall']:.3f})" if args.ner else "")

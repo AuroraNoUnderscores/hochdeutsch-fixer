@@ -3,6 +3,8 @@
 // the text is patched again. Only text nodes are touched (never the DOM
 // structure), and originals are kept so switching off restores the page.
 (() => {
+  // A PDF shown in the viewer page is converted by pdfview.js instead.
+  if (document.documentElement?.hasAttribute('data-hdfx-pdf')) return;
   const E = globalThis.HD_ENGINE;
   const originals = new Map(); // text node -> { orig, conv, counted }
   let host = location.hostname;

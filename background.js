@@ -2,6 +2,7 @@
 // from content scripts, one at a time. Decisions are cached; context-free ones
 // (a word's ß spelling) by word, so a page full of "Strasse" costs one call.
 import { load, score, eszett, MODEL } from './llm.js';
+import { download as pdfDownload, verify as pdfVerify } from './pdfnet.js';
 
 const state = { status: 'idle', progress: 0, decided: 0, error: null, model: MODEL };
 const cache = new Map();
@@ -118,7 +119,28 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === 'rank') return rank(msg.jobs);
   if (msg?.type === 'llm-status') return Promise.resolve({ ...state, log: log.slice(0, 5) });
   if (msg?.type === 'llm-load') { ensure().catch(() => {}); return Promise.resolve(true); }
+  if (msg?.type === 'pdf-verify') return Promise.resolve(pdfVerify(msg.token, sender));
+  if (msg?.type === 'pdf-download') return pdfVerify(msg.token, sender) ? pdfDownload(msg) : Promise.resolve();
+  if (msg?.type === 'pdf-browser-info') return pdfBrowserInfo();
   if (msg?.type === 'top-host') {
     try { return Promise.resolve(new URL(sender.tab?.url || '').hostname || null); } catch { return Promise.resolve(null); }
   }
 });
+
+// What the browser's own viewer is told about the browser (PdfStreamConverter's
+// getBrowserPrefs); the limits are the browser's defaults.
+let browserInfo = null;
+function pdfBrowserInfo() {
+  browserInfo ??= (async () => {
+    const [b, p] = await Promise.all([browser.runtime.getBrowserInfo(), browser.runtime.getPlatformInfo()]);
+    return {
+      version: b.version,
+      os: p.os === 'win' ? 'WINNT' : p.os === 'mac' ? 'Darwin' : 'Linux',
+      locale: browser.i18n.getUILanguage(),
+      allowedGlobalEvents: ['documentloaded', 'pagesloaded', 'layersloaded', 'outlineloaded'],
+      canvasMaxAreaInBytes: 2147483647,
+      maxCanvasDim: 65535,
+    };
+  })();
+  return browserInfo;
+}

@@ -8,12 +8,13 @@ async function refresh() {
   let llm = null, tab_ = null;
   try { llm = await browser.runtime.sendMessage({ type: 'llm-status' }); } catch {}
   try { tab_ = await browser.runtime.sendMessage({ type: 'tab-count', tabId: tab.id }); } catch {}
-  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight']);
+  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight', 'pdf']);
 
   $('enabled').checked = s.enabled !== false;
   $('mode').value = s.mode || 'hamburg';
   $('llm').checked = s.llm !== false;
   $('highlight').checked = !!s.highlight;
+  $('pdf').checked = s.pdf !== false;
   showChanges(tab_);
 
   if (page) {
@@ -100,6 +101,7 @@ $('show-changes').onclick = e => {
   refresh();
 };
 $('highlight').onchange = e => browser.storage.local.set({ highlight: e.target.checked }).then(later);
+$('pdf').onchange = e => browser.storage.local.set({ pdf: e.target.checked });
 
 $('enabled').onchange = e => browser.storage.local.set({ enabled: e.target.checked }).then(later);
 $('mode').onchange = e => browser.storage.local.set({ mode: e.target.value }).then(later);
