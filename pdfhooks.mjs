@@ -83,14 +83,19 @@ function keep(drawn, text) {
   return rest ? rest : null;
 }
 
+// An item's text with its edits, and where the changed words are in it, for
+// the highlights (an edit without marks is one changed word as a whole).
 function applyEdits(str, list) {
-  if (!list?.length) return str;
+  if (!list?.length) return { str, marks: [] };
   let out = '', pos = 0;
+  const marks = [];
   for (const ed of [...list].sort((a, b) => a.s - b.s)) {
-    out += str.slice(pos, ed.s) + ed.t;
+    out += str.slice(pos, ed.s);
+    for (const [a, b] of ed.marks || [[0, ed.t.length]]) if (b > a) marks.push([out.length + a, out.length + b]);
+    out += ed.t;
     pos = ed.e;
   }
-  return out + str.slice(pos);
+  return { str: out + str.slice(pos), marks };
 }
 
 function prepare(page) {
@@ -357,6 +362,37 @@ function canvas(page, operatorList) {
   };
 }
 
+// What the text layer gets for an item with edits: { item, marks } (marks: the
+// changed words in item.str, for the highlights). A reflowed line's text sits
+// in its first fragment, as wide as the line; a justified one word by word,
+// each where it is set (one piece would be stretched evenly, letters and gaps
+// alike, while the canvas widens the gaps); then the lines it gained below.
+function edited(it, list) {
+  const { str, marks } = applyEdits(it.str, list);
+  const ln = list.find(ed => ed.line)?.line;
+  const out = [];
+  // a line of text as one item, or word by word where pdftext.js placed its words
+  const put = (str, marks, dy, width, xs, eol) => {
+    const at = dx => { const t = [...it.transform]; t[4] += dx; t[5] += dy; return t; };
+    const words = xs ? [...str.matchAll(/\S+/g)] : [];
+    if (words.length < 2 || words.length !== xs.length) { out.push({ item: { ...it, str, transform: at(0), width, hasEOL: eol }, marks }); return; }
+    words.forEach((w, k) => {
+      const last = k === words.length - 1;
+      const s = w.index, e = s + w[0].length + (last ? 0 : 1);
+      const [x, wd] = xs[k];
+      out.push({
+        item: { ...it, str: str.slice(s, e), transform: at(x), width: last ? wd : xs[k + 1][0] - x, hasEOL: last && eol },
+        marks: marks.filter(([a, b]) => b > s && a < e).map(([a, b]) => [Math.max(a, s) - s, Math.min(b, e) - s]),
+      });
+    });
+  };
+  const width = ln ? (ln.justify ? ln.width : Math.min(ln.cap, it.width * (str.length / Math.max(1, it.str.length)))) : it.width;
+  put(str, marks, 0, width, ln?.xs, it.hasEOL || !!ln?.more);
+  for (const m of ln?.more || [])
+    put(m.text, m.marks || [[0, m.text.length]], m.dy, Math.min(m.cap, it.width * m.text.length / Math.max(1, str.length)), m.xs, true);
+  return out;
+}
+
 // The text layer (selection, copy, find) and anything else reading text.
 function textStream(page, opts) {
   const raw = page.streamTextContent({ ...opts, __hdfxRaw: true });
@@ -375,17 +411,7 @@ function textStream(page, opts) {
           if (typeof it.str !== 'string') return [it];
           const list = state.byItem.get(n++);
           if (!list) return [it];
-          const str = applyEdits(it.str, list);
-          // a reflowed line's text sits in its first fragment, as wide as the line
-          const ln = list.find(ed => ed.line)?.line;
-          const width = ln ? (ln.justify ? ln.width : Math.min(ln.cap, it.width * (str.length / Math.max(1, it.str.length)))) : it.width;
-          const out = [{ ...it, str: opts.disableNormalization ? str : norm(str), width, ...(ln?.more ? { hasEOL: true } : {}) }];
-          for (const m of ln?.more || []) {
-            const t = [...it.transform];
-            t[5] += m.dy;
-            out.push({ ...it, str: opts.disableNormalization ? m.text : norm(m.text), transform: t, width: Math.min(m.cap, it.width * m.text.length / Math.max(1, str.length)), hasEOL: true });
-          }
-          return out;
+          return edited(it, list).map(({ item }) => (opts.disableNormalization ? item : { ...item, str: norm(item.str) }));
         });
       }
       controller.enqueue(value);
@@ -394,5 +420,66 @@ function textStream(page, opts) {
   });
 }
 
+// ---------- highlights ----------
+// With "Highlight changes on page" on (pdftext.js sets data-hdfx-highlight),
+// changed words are tinted as on any page (content.js, whose own highlight
+// this is not: on Chromium it may run in this page too): a CSS highlight over
+// the text layer's invisible words, which lie on the drawn ones. The viewer
+// hands over each text layer it makes (highlightLayer).
+const root = document.documentElement;
+const layers = new Map();     // text layer div -> page index
+
+// The texts of the layer's words, as textStream gave them, with their marks.
+function layerTexts(state) {
+  const out = [];
+  state.items.forEach((it, n) => {
+    const list = state.byItem.get(n);
+    if (!list) out.push({ str: it.str, marks: [] });
+    else for (const { item, marks } of edited(it, list)) out.push({ str: item.str, marks });
+  });
+  return out.filter(o => o.str !== '');      // the text layer makes no element for these
+}
+
+function paint() {
+  if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
+  const ranges = [];
+  if (root.hasAttribute('data-hdfx-highlight')) for (const [div, idx] of layers) {
+    const state = ready.get(idx);
+    if (!div.isConnected || !state?.edits.length) continue;
+    const want = layerTexts(state);
+    div.querySelectorAll('span[role="presentation"]').forEach((span, n) => {
+      const node = span.firstChild, o = want[n];
+      // a layer from before the model spoke reads otherwise: it is made again
+      if (!o?.marks.length || node?.nodeType !== 3 || node.data !== o.str) return;
+      for (const [a, b] of o.marks) {
+        const r = new Range();
+        r.setStart(node, a); r.setEnd(node, b);
+        ranges.push(r);
+      }
+    });
+  }
+  CSS.highlights.set('hdfx-changed', new Highlight(...ranges));
+}
+
+// The tint's style, where the layer is: Chrome's viewer has its pages in a
+// shadow root, which no style of the document reaches.
+const styled = new WeakSet();
+function style(div) {
+  const where = div.getRootNode();
+  if (styled.has(where)) return;
+  styled.add(where);
+  const el = document.createElement('style');
+  el.textContent = '.textLayer ::highlight(hdfx-changed){background-color:rgba(255,200,0,.45)}';
+  (where === document ? document.head || root : where).append(el);
+}
+
+function highlightLayer(div, idx) {
+  for (const d of layers.keys()) if (!d.isConnected) layers.delete(d);
+  layers.set(div, idx);
+  style(div);
+  paint();
+}
+new MutationObserver(paint).observe(root, { attributes: true, attributeFilter: ['data-hdfx-highlight'] });
+
 globalThis.__hdfx = { prepare, canvas, textStream };
-export { prepare, canvas, textStream };
+export { prepare, canvas, textStream, highlightLayer };
