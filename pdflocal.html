@@ -19,6 +19,8 @@
   .drop { margin-top: 10px; font-size: 12px; color: var(--muted); }
   .alt { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; }
   .alt a { color: var(--muted); }
+  .alt p { margin: 8px 0 0; text-align: left; }
+  .alt + .alt { margin-top: 12px; }
   .error { color: var(--accent); margin: 10px 0 0; }
   body.over main { outline: 2px dashed var(--accent); outline-offset: 6px; }
   [hidden] { display: none !important; }
@@ -31,6 +33,12 @@
   <button id="pick" type="button"></button>
   <div class="drop">or drop the PDF anywhere on this page</div>
   <p class="error" id="error" hidden>That is not a PDF.</p>
+  <div class="alt">
+    <a href="#" id="helper">Open PDFs from this computer without this step</a>
+    <p id="setup" hidden>That takes a small helper on this computer. Download the
+      <a href="https://github.com/AuroraNoUnderscores/hochdeutsch-fixer/tree/main/native" target="_blank" rel="noopener">native</a>
+      folder and run <b>install.bat</b> on Windows, or <b>install.sh</b> on Linux and macOS. Then reload this page.</p>
+  </div>
   <div class="alt"><a href="#" id="original">Show it unconverted in Firefox's viewer</a></div>
 </main>
 <input type="file" id="file" accept=".pdf,application/pdf" hidden>

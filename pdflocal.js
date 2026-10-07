@@ -10,6 +10,15 @@
 
   async function open(data, fileName) {
     const html = await browser.runtime.sendMessage({ type: 'pdf-local', data, name: fileName }).catch(() => null);
+    return show(html);
+  }
+
+  // the file helper (native/), where it is installed: no asking at all
+  async function helper() {
+    return show(await browser.runtime.sendMessage({ type: 'pdf-local-native' }).catch(() => null));
+  }
+
+  function show(html) {
     if (!html) return false;
     document.open();
     document.write(html);
@@ -32,6 +41,14 @@
     $('pick').focus();
     $('pick').onclick = () => $('file').click();
     $('file').onchange = () => take($('file').files[0]);
+    // Without this step from now on: the optional permission (asked for in the
+    // click itself, as Firefox wants), then the helper, if it is installed
+    $('helper').onclick = async e => {
+      e.preventDefault();
+      const granted = await browser.permissions.request({ permissions: ['nativeMessaging'] }).catch(() => false);
+      if (granted && await helper()) return;
+      $('setup').hidden = false;
+    };
     // Back to the PDF, which Firefox then shows itself (pdfnet.js lets it through)
     $('original').onclick = e => { e.preventDefault(); history.back(); };
     const over = on => e => { e.preventDefault(); document.body.classList.toggle('over', on); };
@@ -42,5 +59,5 @@
   }
 
   // opened again (a reload, other settings): the bytes may still be there
-  open(null).then(done => { if (!done) ask(); });
+  open(null).then(done => done || helper()).then(done => { if (!done) ask(); });
 })();

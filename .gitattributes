@@ -3,3 +3,5 @@ models/** -text
 # the browser's PDF viewer, copied by tools/sync_pdfjs.py, and the test PDFs
 pdfjs/** -text
 dev/pdf/*.pdf -text
+# Windows batch files keep Windows line endings
+native/*.bat text eol=crlf
