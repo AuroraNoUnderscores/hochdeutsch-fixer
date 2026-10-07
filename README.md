@@ -6,10 +6,18 @@ German language model running on your own machine settles the calls rules can't 
 
 ## Install
 
-`about:debugging` → This Firefox → Load Temporary Add-on… → pick `manifest.json`.
-Temporary add-ons disappear when Firefox restarts. To keep it, zip the folder
-contents and upload the zip at addons.mozilla.org/developers as "On your own";
-that signs it for free without listing it publicly.
+Open the `.xpi` of the newest [release](https://github.com/AuroraNoUnderscores/hochdeutsch-fixer/releases)
+in Firefox. Later versions arrive by themselves: Firefox checks `updates.json`
+(the `update_url` in `manifest.json`) about once a day.
+
+Every push to `main` with a new version in `manifest.json` releases it
+(`.github/workflows/release.yml`): Mozilla signs it as unlisted, so it is not
+in the store, with the API keys in the repository secrets `AMO_JWT_ISSUER` and
+`AMO_JWT_SECRET`; the signed `.xpi` becomes a GitHub Release, and `updates.json`
+is pointed at it.
+
+For working on it: `about:debugging` → This Firefox → Load Temporary Add-on… →
+pick `manifest.json`. Temporary add-ons disappear when Firefox restarts.
 
 ## How it works
 
