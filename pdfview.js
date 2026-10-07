@@ -19,6 +19,7 @@
     const token = root.getAttribute('data-hdfx-pdf');
     // nothing happens here until the background confirms it served this page
     const verified = browser.runtime.sendMessage({ type: 'pdf-verify', token }).catch(() => false);
+    HD_PDFTEXT.highlights();
     const page = window.wrappedJSObject || window;
     const toPage = v => (typeof cloneInto === 'function' ? cloneInto(v, window) : v);
     const fromPage = v => {
