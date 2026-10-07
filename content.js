@@ -129,6 +129,7 @@
     CSS.highlights.delete('hd-changed');
     CSS.highlights.delete('hd-name');
     document.getElementById(STYLE_ID)?.remove();
+    armHover();
     if (!highlight || !active) return;
     const changed = [], kept = [];
     const range = (node, a, b) => {
@@ -147,8 +148,202 @@
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = '::highlight(hd-changed){background-color:rgba(255,200,0,.45)}'
-      + '::highlight(hd-name){text-decoration:underline dotted #0a84ff 2px}';
+      + '::highlight(hd-name){text-decoration:underline dotted #0a84ff 2px}'
+      + '::highlight(hd-hover){background-color:rgba(255,170,0,.7)}';
     (document.head || document.documentElement).append(style);
+  }
+
+  // ---------- the original, on hover ----------
+  // With highlights on, pointing at a changed word shows what the site wrote and
+  // why it changed: a rule, the model's pick (and what it picked over), or the
+  // ss/ß spelling; a name the model kept says what kind of name it took it for.
+  // The card lives in a closed shadow root on top of the page: the page's styles
+  // cannot reach it, it takes no pointer events, and the text stays untouched.
+  const NAME_KINDS = { PER: "a person's name", LOC: 'a place', ORG: 'an organisation' };
+  let tip = null, shownKey = null, hideTimer = null, frame = 0, armed = false;
+
+  // A node's choices, with where each sits in the converted text.
+  function choicesOf(rec) {
+    const out = [];
+    let at = 0;
+    for (const p of rec.pieces || []) {
+      const text = typeof p === 'string' ? p : E.renderPieces([p]);
+      if (typeof p === 'object') out.push([at, at + text.length, p]);
+      at += text.length;
+    }
+    return out;
+  }
+
+  function why(rec, a, b, from, to) {
+    const p = choicesOf(rec).find(([s, e]) => s < b && e > a)?.[2];
+    const over = p && p.kind !== 'eszett' && p.rank !== false
+      ? [...new Set(p.options.filter((o, i) => i !== p.pick && o !== to && o.trim()))] : [];
+    if (over.length) {
+      const list = over.slice(0, 3).map(o => `„${o.trim()}“`).join(', ') + (over.length > 3 ? ' …' : '');
+      const by = !llm ? "The rules' pick (model off), over "
+        : rec.ranked ? "The model's pick, over " : "The rules' pick (the model hasn't checked it yet), over ";
+      return by + list;
+    }
+    if (from.replace(/ss/g, 'ß') === to || to.replace(/ß/g, 'ss') === from) return 'Swiss spelling: ss → ß';
+    if (mode === 'hamburg') {
+      const neutral = E.convert(from, { mode: 'neutral' }).text;
+      if (neutral !== to) return neutral === from ? 'Hamburg flavour' : `Hamburg flavour (Neutral: „${neutral}“)`;
+    }
+    return /\s/.test(from) || /\s/.test(to) ? 'Swiss usage' : 'Swiss word';
+  }
+
+  // The changed word or kept name under the pointer, if any. The caret position
+  // lands on the nearest text even beside it, so the word's own boxes decide.
+  function hit(x, y) {
+    let node, off;
+    const pos = document.caretPositionFromPoint?.(x, y);
+    if (pos) { node = pos.offsetNode; off = pos.offset; }
+    else { const r = document.caretRangeFromPoint?.(x, y); node = r?.startContainer; off = r?.startOffset; }
+    const rec = node && originals.get(node);
+    if (!rec || node.nodeValue !== rec.conv) return null;
+    const spans = [
+      ...changesOf(rec).filter(([a, b]) => b > a).map(([a, b, from, to]) => ({ a, b, from, to, note: () => why(rec, a, b, from, to) })),
+      ...namesOf(rec).map(([a, b, word]) => {
+        const p = choicesOf(rec).find(([s, e]) => s <= a && e >= b)?.[2];
+        return { a, b, from: null, to: word, note: () => `Kept as written: looks like ${NAME_KINDS[p?.nameInfo?.kind] || 'a name'}`
+          + (p ? ` (otherwise „${p.options[p.pick]}“)` : '') };
+      }),
+    ];
+    for (const s of spans) {
+      if (off < s.a || off > s.b) continue;
+      const range = document.createRange();
+      range.setStart(node, s.a);
+      range.setEnd(node, Math.min(s.b, node.length));
+      const rect = [...range.getClientRects()].find(r => x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1);
+      if (rect) return { ...s, range, rect, key: s.a + ':' + s.b, node };
+    }
+    return null;
+  }
+
+  function el(tag, cls, parent) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    parent?.append(e);
+    return e;
+  }
+
+  function makeTip() {
+    const host = document.createElement('hochdeutsch-fixer-tip');
+    host.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+    const root = host.attachShadow({ mode: 'closed' });
+    const style = el('style', null, root);
+    style.textContent = `
+      :host { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.12); --mark: #e8a200; }
+      @media (prefers-color-scheme: dark) { :host { --bg: #2b2a33; --fg: #fbfbfe; --muted: #a8a8b3; --line: rgba(255,255,255,.14); --mark: #ffc845; } }
+      .card { position: fixed; left: 0; top: 0; max-width: 300px; box-sizing: border-box; padding: 7px 10px 8px;
+        font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg);
+        border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 6px 20px rgba(0,0,0,.14), 0 1px 3px rgba(0,0,0,.08);
+        opacity: 0; transform: translate3d(var(--x, 0), calc(var(--y, 0) + var(--dy, 4px)), 0);
+        transition: opacity 120ms ease-out, transform 180ms cubic-bezier(.2,.8,.2,1); will-change: transform, opacity; }
+      .card.on { opacity: 1; --dy: 0px; }
+      .card.below { --dy: -4px; }
+      .card.on.below { --dy: 0px; }
+      .card.still { transition: none; }
+      .row { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+      .from { position: relative; color: var(--muted); }
+      .from::after { content: ''; position: absolute; left: -1px; right: -1px; top: 54%; height: 1.5px; border-radius: 1px;
+        background: currentColor; transform: scaleX(1); transform-origin: left center; }
+      .card.fresh .from::after { animation: strike 220ms 70ms cubic-bezier(.4,0,.2,1) both; }
+      @keyframes strike { from { transform: scaleX(0); } }
+      .arrow { color: var(--muted); font-size: 12px; }
+      .to { font-weight: 600; box-shadow: inset 0 -2px 0 var(--mark); }
+      .row.kept .from, .row.kept .arrow { display: none; }
+      .row.kept .to { box-shadow: none; text-decoration: underline dotted #0a84ff 2px; text-underline-offset: 3px; }
+      .note { margin-top: 3px; font-size: 11.5px; color: var(--muted); white-space: normal; }
+      @media (prefers-reduced-motion: reduce) {
+        .card { transition: opacity 100ms linear; transform: translate3d(var(--x, 0), var(--y, 0), 0); }
+        .card.fresh .from::after { animation: none; }
+      }`;
+    const card = el('div', 'card', root);
+    card.setAttribute('role', 'tooltip');
+    const row = el('div', 'row', card);
+    const from = el('span', 'from', row);
+    el('span', 'arrow', row).textContent = '→';
+    const to = el('span', 'to', row);
+    const note = el('div', 'note', card);
+    document.documentElement.append(host);
+    return { host, card, row, from, to, note };
+  }
+
+  function show(h) {
+    clearTimeout(hideTimer);
+    if (h.key + h.to === shownKey && tip?.card.classList.contains('on')) return;
+    tip ||= makeTip();
+    if (!tip.host.isConnected) document.documentElement.append(tip.host);
+    const { card, row, from, to, note } = tip;
+    const wasOn = card.classList.contains('on');
+    shownKey = h.key + h.to;
+    row.classList.toggle('kept', h.from == null);
+    from.textContent = h.from || '∅';
+    to.textContent = h.to || '∅';
+    note.textContent = h.note();
+    // where it goes: above the word, or below it at the top of the window
+    const w = card.offsetWidth, ht = card.offsetHeight, gap = 8;
+    const x = Math.round(Math.max(6, Math.min(h.rect.left + h.rect.width / 2 - w / 2, innerWidth - w - 6)));
+    let y = Math.round(h.rect.top - ht - gap);
+    const below = y < 6;
+    if (below) y = Math.round(h.rect.bottom + gap);
+    // from word to word it glides; out of nowhere it fades in where it belongs
+    if (!wasOn) { card.classList.add('still'); card.classList.toggle('below', below); }
+    card.style.setProperty('--x', x + 'px');
+    card.style.setProperty('--y', y + 'px');
+    card.classList.remove('fresh');
+    void card.offsetWidth;                       // start the strike again
+    card.classList.add('fresh');
+    if (!wasOn) { card.classList.remove('still'); void card.offsetWidth; }
+    card.classList.add('on');
+    if (globalThis.CSS?.highlights && typeof Highlight !== 'undefined') {
+      const hl = new Highlight(h.range);
+      hl.priority = 1;
+      CSS.highlights.set('hd-hover', hl);
+    }
+  }
+
+  function hide(now) {
+    clearTimeout(hideTimer);
+    const go = () => {
+      shownKey = null;
+      tip?.card.classList.remove('on', 'fresh');
+      globalThis.CSS?.highlights?.delete('hd-hover');
+    };
+    // a short grace, so the card glides between neighbouring words instead of blinking
+    if (now) go(); else hideTimer = setTimeout(go, 90);
+  }
+
+  function onMove(e) {
+    if (e.pointerType === 'touch') return;
+    const { clientX: x, clientY: y } = e;
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      const h = hit(x, y);
+      h ? show(h) : hide();
+    });
+  }
+  const onTap = e => {
+    if (e.pointerType !== 'touch') return;
+    const h = hit(e.clientX, e.clientY);
+    h ? show(h) : hide(true);
+  };
+  const onKey = e => { if (e.key === 'Escape') hide(true); };
+  const onScroll = () => hide(true);
+
+  // Listening only while highlights are on, and only where something changed.
+  function armHover() {
+    const want = highlight && active && originals.size > 0;
+    if (want === armed) return;
+    armed = want;
+    const add = want ? addEventListener : removeEventListener;
+    add('pointermove', onMove, { passive: true, capture: true });
+    add('pointerdown', onTap, { passive: true, capture: true });
+    add('keydown', onKey, true);
+    add('scroll', onScroll, { passive: true, capture: true });
+    add('blur', onScroll);
+    if (!want) { hide(true); tip?.host.remove(); }
   }
 
   const SKIP = 'script,style,noscript,textarea,input,select,code,pre,kbd,samp,[contenteditable=""],[contenteditable="true"]';
@@ -237,7 +432,10 @@
       if (originals.get(node) !== rec || rec.conv !== node.nodeValue) continue; // page moved on
       let moved = false;
       try {
-        moved = await E.resolve(pieces, jobs => browser.runtime.sendMessage({ type: 'rank', jobs }));
+        // ranked: the model answered for this text (not loaded yet, or the
+        // background gone, and the rules' picks stand)
+        moved = await E.resolve(pieces, jobs => browser.runtime.sendMessage({ type: 'rank', jobs })
+          .then(picks => { if (picks) rec.ranked = true; return picks; }));
       } catch { /* background not available */ }
       if (!moved || !active) { report(); continue; }   // names the model kept still count for the list
       if (originals.get(node) !== rec || rec.conv !== node.nodeValue) continue;
