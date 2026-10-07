@@ -47,6 +47,40 @@
 
   const distinct = (text, re) => new Set((text.match(re) || []).map(m => m.toLowerCase()));
 
+  // distinct() of context + ' ' + text, the context's part kept between calls:
+  // neighbouring paragraphs share their context. A global regex scans left to
+  // right with no state but its position, and none of these cues is longer
+  // than CUE_MAX, so a match that ends CUE_MAX before the end of the context
+  // cannot see what follows it. Those matches are kept; the scan is resumed
+  // after them, on the joined text, for the rest.
+  const CUE_MAX = Math.max(...[D.meta.strong, D.meta.sentence, D.meta.weak].flatMap(a => a.split('|').map(x => x.length))) + 4;
+  const scanned = new Map();       // regex -> { context, matches: [[start, end, lower]] }
+  function distinctJoined(context, text, re) {
+    let seen = scanned.get(re);
+    if (!seen || seen.context !== context) {
+      const matches = [];
+      re.lastIndex = 0;
+      for (let m; (m = re.exec(context));) {
+        matches.push([m.index, re.lastIndex, m[0].toLowerCase()]);
+        if (m[0] === '') re.lastIndex++;
+      }
+      scanned.set(re, (seen = { context, matches }));
+    }
+    let from = Math.max(0, context.length - CUE_MAX);
+    for (const [a, b] of seen.matches) if (a < from && b > from) from = b;
+    const out = new Set();
+    for (const [, b, m] of seen.matches) if (b <= from) out.add(m);
+    const joined = context + ' ' + text;
+    re.lastIndex = from;
+    for (let m; (m = re.exec(joined));) { out.add(m[0].toLowerCase()); if (m[0] === '') re.lastIndex++; }
+    return out;
+  }
+  function isMetaJoined(context, text) {
+    const strong = distinctJoined(context, text, META_STRONG).size, clear = distinctJoined(context, text, META_SENTENCE).size;
+    const weak = distinctJoined(context, text, META_WEAK).size;
+    return strong >= 1 || clear >= 2 || (clear >= 1 && weak >= 1);
+  }
+
   // Is this text talking about words rather than using them? A sentence needs one
   // unmistakable cue ("in der Mehrzahl zu Massen"); a block a strong cue, two
   // clear ones, or one with a weak cue beside it; a whole page a strong cue with
@@ -240,7 +274,10 @@
   function ssChoice(w) {
     const lower = w.toLowerCase();
     if (allCaps(w) || ssKeep.has(lower)) return null;
-    for (const k of ssKeep) if (k.length >= 5 && (lower.startsWith(k) || lower.endsWith(k))) return null;
+    // a kept word of 5+ letters that starts or ends it: the word's own prefixes
+    // and suffixes are looked up (a dozen lookups, not one per kept word)
+    for (let n = 5; n < lower.length; n++)
+      if (ssKeep.has(lower.slice(0, n)) || ssKeep.has(lower.slice(-n))) return null;
     const idx = [];
     for (let i = 1; i < w.length - 1; i++)
       if (w[i] === 's' && w[i + 1] === 's' && /[aeiouäöüy]/i.test(w[i - 1])) idx.push(i);
@@ -259,6 +296,7 @@
 
   function wordPass(t, text, tokens, { context, german }) {
     const haystack = (context ? context + ' ' : '') + text;
+    joinedOf = { joined: haystack, parts: context ? [context, text] : [text] };
     // Cues are judged on the sentence first, then the whole text, then the block
     // around it. A long note holds several sentences and "Koffer" in one of them
     // must not decide the spelling in another.
@@ -272,6 +310,9 @@
     };
     const spans = metaSentences(text);
     let span = 0;
+    // where the token's sentence starts: after the last . ! or ? before it,
+    // tracked as the tokens go (searching back from each made a paragraph quadratic)
+    let scan = 0, stop = -1;
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       if (!tok.w || quoted(tokens, i)) continue;
@@ -288,7 +329,8 @@
         continue;
       }
       const end = tok.at + w.length;
-      const start = Math.max(text.lastIndexOf('.', tok.at), text.lastIndexOf('!', tok.at), text.lastIndexOf('?', tok.at)) + 1;
+      for (; scan <= tok.at; scan++) { const c = text.charCodeAt(scan); if (c === 46 || c === 33 || c === 63) stop = scan; }
+      const start = stop + 1;
       // "Ich bin pressiert" is "in Eile", "Es pressiert" is "Es eilt".
       const pred = D.predicative?.[w];
       if (pred && SEIN.test(text.slice(start, tok.at).split(/[,;:]/).pop())) { tok.s = pred; continue; }
@@ -591,8 +633,33 @@
   }
 
   // True when the text already shows both spellings, i.e. it is comparing them.
+  // A word stands alone in the text exactly when it is one of the text's runs
+  // of letters, so a word made of letters is looked up among them: the runs
+  // are collected once per text, not searched for word by word.
+  // Latin letters only, where lower case and the regex's case folding agree
+  // (ſ folds to s); any other word is searched for as before.
+  const LETTERS = /^(?:[A-Za-z\u00C0-\u024F\u1E9E](?<=\p{L}))+$/u;
+  const caseKey = w => w.toLowerCase().replace(/ſ/g, 's');
+  // A text's runs, the last few texts kept: a page's or a block's context is
+  // the same for all its paragraphs. No run crosses the space that joins
+  // context and text, so the runs of the two are those of each (joinedOf).
+  const runSets = new Map();
+  function runsIn(str) {
+    let set = runSets.get(str);
+    if (!set) {
+      set = new Set((str.match(/\p{L}+/gu) || []).map(caseKey));
+      runSets.set(str, set);
+      if (runSets.size > 8) runSets.delete(runSets.keys().next().value);
+    }
+    return set;
+  }
+  let joinedOf = null;             // { joined, parts }: the haystack wordPass made, and what of
   function contrasted(haystack, from, to) {
     if (from === to) return false;
+    if (LETTERS.test(to)) {
+      const key = caseKey(to);
+      return joinedOf?.joined === haystack ? joinedOf.parts.some(p => runsIn(p).has(key)) : runsIn(haystack).has(key);
+    }
     return new RegExp(`(?<!\\p{L})${to}(?!\\p{L})`, 'iu').test(haystack);
   }
 
@@ -824,7 +891,7 @@
     const t = tables(opts.mode || 'hamburg');
     // Pages and blocks explaining words keep their examples ("sagt man Velo",
     // "in der Mehrzahl zu Massen"); rewriting those would say the opposite.
-    if (opts.meta || isMeta((opts.context ? opts.context + ' ' : '') + text))
+    if (opts.meta || (opts.context ? isMetaJoined(opts.context, text) : isMeta(text)))
       return { text, changes: 0, fixed: 0, pieces: [text] };
     let changes = 0;
     if (t.phraseRe) text = text.replace(t.phraseRe, m => { changes++; return t.phraseMap.get(m); });
