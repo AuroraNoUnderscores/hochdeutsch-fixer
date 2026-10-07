@@ -57,6 +57,9 @@ globalThis.HD_PDFTEXT = (() => {
   // A paragraph's text, and where each of its characters came from: [item,
   // offset], or null for a space between items or lines. A word hyphenated at a
   // line end is joined without its hyphen ("Velo-" + "weg" reads "Veloweg").
+  // A hyphen before "und", "oder" … stands for a word's shared ending
+  // ("Korrektur- und Verbesserungsvorschläge") and is kept, with its space.
+  const SUSPENDED = /^\s*(?:und|oder|bzw|beziehungsweise|sowie|bis|noch|als|wie)(?!\p{L})/u;
   function assemble(items, para) {
     let text = '';
     const from = [];
@@ -74,7 +77,7 @@ globalThis.HD_PDFTEXT = (() => {
       if (li < para.length - 1) {
         const next = para[li + 1].map(i => items[i].str).join('');
         const m = /(\p{L})-\s*$/u.exec(text);
-        if (m && /^\s*\p{Ll}/u.test(next)) {
+        if (m && /^\s*\p{Ll}/u.test(next) && !SUSPENDED.test(next)) {
           // drop the hyphen (and spaces after it) from the text; the item keeps it
           const cut = text.length - m[0].length + 1;
           text = text.slice(0, cut); from.length = cut;
@@ -298,7 +301,8 @@ globalThis.HD_PDFTEXT = (() => {
       }
       if (width(rest) > cap * 0.03 && free(lines2.length)) {
         // the old last line is now a full line of the paragraph
-        if (justified || geo.length === 1) Object.assign(lastOut, { justify: justified });
+        // (justified, it is as wide as the paragraph's other lines, not as it was)
+        if (justified || geo.length === 1) Object.assign(lastOut, { justify: justified, ...(justified ? { width: right - lastGeo.x0 } : {}) });
         lines2.forEach((t, n) => more.push({ dy: -leading * (n + 1), text: t, cap }));
       } else {
         lastOut.text = [lastOut.text, rest].filter(Boolean).join(' ');
