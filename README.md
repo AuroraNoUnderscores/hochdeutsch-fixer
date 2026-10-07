@@ -223,6 +223,36 @@ Measured on real documents (federal guidelines, cantonal forms, an ETH safety
 manual of 132 pages): first page on screen after 0.45 s instead of 0.30 s, the
 difference being the conversion.
 
+### PDFs on this computer
+
+Firefox shows a `file://` PDF in its own viewer, which no extension may enter,
+and it lets no extension read a file by itself (not even with "Access local
+files on your computer" switched on: that lets content scripts into `file://`
+pages, and Firefox's PDF viewer is not one of them). So a tab
+opening a PDF from your computer goes to the extension's page for it
+(`pdflocal.html`), which names the file: one click on **Open …pdf** and
+choosing it, or dropping the file on the page, and it opens in the same viewer
+as any PDF, converted. Its `#page=` is
+kept. *Show it unconverted* (or Back) shows the PDF in Firefox's viewer as
+before; switching **PDFs too** off leaves local PDFs to Firefox altogether.
+Reloading the page or changing a setting reopens the same file without asking
+again.
+
+### Formulas, list labels and missing letters
+
+A changed word is found among the glyphs pdf.js draws by the page's text with
+its spaces removed. Letters from formulas (𝑆, 𝛼, 𝐺 in LaTeX documents) are
+two UTF-16 units each and are compared after normalising them to S, α, G; a
+short piece drawn on its own ("(b)", "|", a subscript) is only matched just
+ahead of the last one, never far down the page, where the same characters
+recur. A reflowed line that pdf.js reports as one piece but the PDF draws in
+several (a list label "(a)" and its text) keeps the pieces that read as before
+and sets the rest of the line in the piece after them.
+
+Letters a subset font does not contain come from the installed font closest to
+it; LaTeX's TeX Gyre and URW fonts are matched to their originals (Pagella to
+Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
+
 ## Settings (toolbar popup)
 
 - **Enabled**, and a per-site switch. Turning it off restores the page without a reload.

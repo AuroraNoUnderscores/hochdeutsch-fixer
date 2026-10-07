@@ -28,6 +28,14 @@ async function refresh() {
       : `${n} replacement${n === 1 ? '' : 's'} on this page${inFrames}`;
   } else {
     $('site-row').hidden = true;
+    // Chromium only (its popup has the button): this extension runs on PDFs from
+    // this computer once its "Allow access to file URLs" switch is on, which only
+    // the reader may turn on. Without it, a file:// tab tells the popup nothing.
+    const files = $('file-access');
+    if (files && s.enabled !== false && s.pdf !== false) {
+      files.hidden = await chrome.extension.isAllowedFileSchemeAccess().catch(() => true);
+      files.onclick = () => browser.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+    }
     $('count').textContent = tab_ && tab_.count
       ? `${tab_.count} replacement${tab_.count === 1 ? '' : 's'} in this tab`
       : 'Not available on this page.';
