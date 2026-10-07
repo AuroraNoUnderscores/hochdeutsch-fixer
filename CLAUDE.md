@@ -11,7 +11,8 @@ This repo owns the logic shared with the Chromium port,
   for it.
 - **Shared files are changed here first** (the list is in the Chromium repo's
   `sync.sh`), then copied there with `./sync.sh` in the same change.
-- **One branch, one PR per repo,** with the same branch name, opened together,
-  each linking to the other, and merged together.
+- **"Push" means push to `main`,** in both repos at once. Make a branch or open
+  a PR only when the owner asks for one; then it is one per repo, with the same
+  branch name, each linking to the other, merged together.
 - **Before pushing, run `tools/check_sync.sh` in the Chromium repo.** It must
   say "in step".
