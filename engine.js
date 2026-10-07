@@ -726,6 +726,25 @@
   // "Der Kollege, wo mir hilft" -> "der mir hilft". After a place or a time,
   // "wo" is ordinary German and stays. The last part of a compound decides:
   // "Wohnort" is a place, "Tagesmutter" is not.
+  const LOCATIVE = /^(?:in|an|auf|unter|über|vor|hinter|neben|zwischen|bei)$/i;
+  const SUBJECT = new Set(['ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'man']);
+  // Does the clause after "wo" have a subject of its own ("wo er arbeitet",
+  // "wo neue Sätze gefunden wurden")? Without one, "wo" is the subject itself
+  // ("wo mir hilft"), and so a relative pronoun. A noun in a prepositional
+  // phrase ("am Montag") is no subject.
+  function ownSubject(tokens, i) {
+    for (let j = i + 1; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (!t.w) { if (/[,;:.!?]/.test(t.s)) return false; continue; }
+      if (SUBJECT.has(t.w.toLowerCase())) return true;
+      if (!isUpper(t.w[0])) continue;
+      let k = j - 2;                                     // before its determiner and adjectives
+      while (k > i && tokens[k].w && (M.parseDet(tokens[k].w) && !M.parseDet(tokens[k].w).prep || M.splitAdj(tokens[k].w))) k -= 2;
+      const before = k > i && tokens[k].w?.toLowerCase();
+      if (!before || !(M.PREP[before] || M.parseDet(before)?.prep)) return true;
+    }
+    return false;
+  }
   function woPass(tokens) {
     const keep = new RegExp('(?:' + D.syntax.woKeep + ')$', 'i');
     for (let i = 0; i < tokens.length; i++) {
@@ -747,7 +766,14 @@
       const cells = M.detCells(det);
       const forms = [...new Set(cells.flatMap(({ cell }) => [0, 1, 2].map(c => M.REL[cell][c])))];
       if (!forms.length) continue;
-      tok.piece = { options: [...forms, tok.s], pick: 0, conf: CONF.form };
+      // in a place the noun names ("in der Forschung, wo neue Sätze …"): a
+      // dative after a preposition of place, and a clause with a subject of its
+      // own; "wo" is German there too. "Bei der Familie, wo nett ist" has none.
+      // The model may still choose the pronoun.
+      let p = d - 1;
+      while (p >= 0 && !tokens[p].w) p--;
+      const place = p >= 0 && LOCATIVE.test(tokens[p].s) && /^(?:dem|der|einem|einer)$/i.test(tokens[d].s) && ownSubject(tokens, i);
+      tok.piece = { options: [...forms, tok.s], pick: place ? forms.length : 0, conf: CONF.form };
     }
   }
 
