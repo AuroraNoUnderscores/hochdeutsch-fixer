@@ -180,7 +180,9 @@
       ? [...new Set(p.options.filter((o, i) => i !== p.pick && o !== to && o.trim()))] : [];
     if (over.length) {
       const list = over.slice(0, 3).map(o => `„${o.trim()}“`).join(', ') + (over.length > 3 ? ' …' : '');
-      return (llm ? "The model's pick, over " : 'The rules\' pick (model off), over ') + list;
+      const by = !llm ? "The rules' pick (model off), over "
+        : rec.ranked ? "The model's pick, over " : "The rules' pick (the model hasn't checked it yet), over ";
+      return by + list;
     }
     if (from.replace(/ss/g, 'ß') === to || to.replace(/ß/g, 'ss') === from) return 'Swiss spelling: ss → ß';
     if (mode === 'hamburg') {
@@ -430,7 +432,10 @@
       if (originals.get(node) !== rec || rec.conv !== node.nodeValue) continue; // page moved on
       let moved = false;
       try {
-        moved = await E.resolve(pieces, jobs => browser.runtime.sendMessage({ type: 'rank', jobs }));
+        // ranked: the model answered for this text (not loaded yet, or the
+        // background gone, and the rules' picks stand)
+        moved = await E.resolve(pieces, jobs => browser.runtime.sendMessage({ type: 'rank', jobs })
+          .then(picks => { if (picks) rec.ranked = true; return picks; }));
       } catch { /* background not available */ }
       if (!moved || !active) { report(); continue; }   // names the model kept still count for the list
       if (originals.get(node) !== rec || rec.conv !== node.nodeValue) continue;
