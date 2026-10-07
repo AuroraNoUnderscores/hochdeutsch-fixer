@@ -226,6 +226,66 @@ export async function local({ data, name }, sender) {
   return localViewerHtml();
 }
 
+// With the file helper installed (native/, and the optional "nativeMessaging"
+// permission given), the file is read without asking: the helper reads this
+// one PDF and exits. Only the file this tab was on its way to, never one the
+// page names itself; and where the helper is missing, the page asks as before.
+const HELPER = 'hochdeutsch_fixer';
+export async function localNative(sender) {
+  const url = sender.url, tabId = sender.tab?.id ?? -1;
+  const file = shown.get(tabId);
+  if (!url?.startsWith(LOCAL) || !file) return null;
+  const want = new URL(file);
+  want.hash = '';
+  if (new URL(url).searchParams.get('file') !== want.href) return null;
+  if (!(await browser.permissions.contains({ permissions: ['nativeMessaging'] }))) return null;
+  const path = filePath(want);
+  const data = path && await readNative(path).catch(() => null);
+  if (!data) return null;
+  return local({ data: data.buffer, name: path.split(/[\\/]/).pop() }, sender);
+}
+
+// A file:// address as the system names the file: /home/… on Linux and macOS,
+// C:\… or \\server\share\… on Windows.
+function filePath(u) {
+  try {
+    const p = decodeURIComponent(u.pathname);
+    if (u.host) return '\\\\' + u.host + p.replace(/\//g, '\\');
+    if (/^\/[A-Za-z]:\//.test(p)) return p.slice(1).replace(/\//g, '\\');
+    return p;
+  } catch { return null; }
+}
+
+// The helper's protocol (native/hdfx_file.sh): the path in base64, then the
+// file in base64 pieces of 512 KiB, then "done", or an error.
+function readNative(path) {
+  return new Promise((resolve, reject) => {
+    const port = browser.runtime.connectNative(HELPER);
+    const parts = [];
+    let size = 0;
+    const timer = setTimeout(() => { port.disconnect(); reject(new Error('the helper took too long')); }, 60000);
+    port.onMessage.addListener(m => {
+      if (typeof m?.chunk === 'string') {
+        const bin = atob(m.chunk), part = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) part[i] = bin.charCodeAt(i);
+        parts.push(part);
+        size += part.length;
+        return;
+      }
+      clearTimeout(timer);
+      port.disconnect();
+      if (!m?.done) return reject(new Error(m?.error || 'the helper failed'));
+      const data = new Uint8Array(size);
+      let at = 0;
+      for (const part of parts) { data.set(part, at); at += part.length; }
+      resolve(data);
+    });
+    port.onDisconnect.addListener(p => { clearTimeout(timer); reject(p.error || new Error('no helper')); });
+    const utf8 = new TextEncoder().encode(path);
+    port.postMessage({ path: btoa(String.fromCharCode(...utf8)) });
+  });
+}
+
 // Is this the viewer page served for a PDF at this address, in this tab and frame?
 export function verify(token, sender) {
   if (token !== TOKEN) return false;

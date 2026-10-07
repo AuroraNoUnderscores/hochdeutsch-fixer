@@ -238,6 +238,26 @@ before; switching **PDFs too** off leaves local PDFs to Firefox altogether.
 Reloading the page or changing a setting reopens the same file without asking
 again.
 
+**Without the asking:** a small helper on your computer can read the file for
+the extension, and then a PDF from disk opens converted at once, like any
+other. Click *Open PDFs from this computer without this step* on that page
+(Firefox asks to let the extension "exchange messages with programs other than
+Firefox"), then run the installer from [`native/`](native/) once:
+**install.bat** on Windows, **install.sh** on Linux and macOS. It installs for
+your user only, no admin or root needed, and **uninstall** takes it away again.
+
+- **What it is:** a script of a few dozen lines (`hdfx_file.sh`; on Windows
+  `hdfx_file.cs`, which the installer builds into a small `.exe` with the C#
+  compiler every Windows has, or `hdfx_file.ps1` where that fails).
+- **What it costs:** nothing while you are not opening a local PDF. Firefox
+  starts it for that one file; it reads it, hands it over and exits. Nothing
+  keeps running, and it takes a few kilobytes on disk.
+- **What it may do:** only this extension can start it, and it reads only a
+  file whose name ends in `.pdf` and that starts like a PDF, the one the tab
+  was opening. Without it, or without the permission, the page asks as before.
+- **Sandboxed Firefox** (Flatpak, and some Snap builds) may not be allowed to
+  start programs outside the sandbox; there the page keeps asking.
+
 ### Formulas, list labels and missing letters
 
 A changed word is found among the glyphs pdf.js draws by the page's text with
