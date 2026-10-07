@@ -256,7 +256,11 @@ your user only, no admin or root needed, and **uninstall** takes it away again.
 
 - **What it is:** a script of a few dozen lines (`hdfx_file.sh`; on Windows
   `hdfx_file.cs`, which the installer builds into a small `.exe` with the C#
-  compiler every Windows has, or `hdfx_file.ps1` where that fails).
+  compiler every Windows has, or `hdfx_file.ps1` where that fails, or where
+  Windows refuses an `.exe` it does not know: Smart App Control, or an
+  organisation's Application Control policy; that one takes about half a
+  second per PDF). The installer tries each as Firefox will start it, keeps
+  the first that reads a test PDF, and says so.
 - **What it costs:** nothing while you are not opening a local PDF. Firefox
   starts it for that one file; it reads it, hands it over and exits. Nothing
   keeps running, and it takes a few kilobytes on disk.

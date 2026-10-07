@@ -1,7 +1,10 @@
 # Installs Hochdeutsch-Fixer's file helper for this Windows user (no admin
 # needed): copies it to %LOCALAPPDATA%\Hochdeutsch-Fixer, builds
 # hdfx_file.exe there when the C# compiler of .NET Framework 4 is present
-# (every Windows 10 and 11 has it), and tells Firefox where it is. Run it
+# (every Windows 10 and 11 has it), and tells Firefox where it is. Each
+# helper is tried as Firefox will start it, the fast one first; Windows may
+# refuse an .exe it does not know (Smart App Control, or an organisation's
+# Application Control policy), and then the PowerShell one is used. Run it
 # through install.bat; uninstall.bat takes it all away again.
 $ErrorActionPreference = 'Stop'
 $name = 'hochdeutsch_fixer'
@@ -9,29 +12,31 @@ $dir = Join-Path $env:LOCALAPPDATA 'Hochdeutsch-Fixer'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 Copy-Item -Force -Path (Join-Path $PSScriptRoot 'hdfx_file.ps1'), (Join-Path $PSScriptRoot 'hdfx_file.bat') -Destination $dir
 
-# the fast helper where it can be built, else the PowerShell one
-$target = Join-Path $dir 'hdfx_file.bat'
+# the fast helper where it can be built, then the PowerShell one
+$targets = @()
 $exe = Join-Path $dir 'hdfx_file.exe'
+Remove-Item -Force -ErrorAction SilentlyContinue $exe
 $csc = @('Framework64', 'Framework') | ForEach-Object { Join-Path $env:WINDIR "Microsoft.NET\$_\v4.0.30319\csc.exe" } |
   Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($csc) {
   & $csc /nologo /optimize /target:exe "/out:$exe" (Join-Path $PSScriptRoot 'hdfx_file.cs') | Out-Null
-  if ($LASTEXITCODE -eq 0 -and (Test-Path $exe)) { $target = $exe }
+  if ($LASTEXITCODE -eq 0 -and (Test-Path $exe)) { $targets += $exe }
 }
+$targets += Join-Path $dir 'hdfx_file.bat'
 
 # Firefox finds the helper through this file, named in the registry
 $manifest = Join-Path $dir "$name.json"
-$json = [ordered]@{
-  name = $name
-  description = 'Hochdeutsch-Fixer: opens a PDF from this computer for the extension'
-  path = $target
-  type = 'stdio'
-  allowed_extensions = @('hochdeutsch-fixer@addons.local')
-} | ConvertTo-Json
-[IO.File]::WriteAllText($manifest, $json)
-New-Item -Force -Path "HKCU:\Software\Mozilla\NativeMessagingHosts\$name" -Value $manifest | Out-Null
-
-Write-Host "Installed: $target"
+function Register([string]$target) {
+  $json = [ordered]@{
+    name = $name
+    description = 'Hochdeutsch-Fixer: opens a PDF from this computer for the extension'
+    path = $target
+    type = 'stdio'
+    allowed_extensions = @('hochdeutsch-fixer@addons.local')
+  } | ConvertTo-Json
+  [IO.File]::WriteAllText($manifest, $json)
+  New-Item -Force -Path "HKCU:\Software\Mozilla\NativeMessagingHosts\$name" -Value $manifest | Out-Null
+}
 
 # Self-test: what Firefox will do, step by step. The registry names the
 # manifest, the manifest names the helper, and the helper reads a small PDF.
@@ -53,9 +58,12 @@ function Test-Helper {
   $psi.RedirectStandardOutput = $true
   $psi.RedirectStandardError = $true
   try { $p = [Diagnostics.Process]::Start($psi) } catch { return "the helper did not start: $_" }
-  $p.StandardInput.BaseStream.Write([BitConverter]::GetBytes([int]$req.Length), 0, 4)
-  $p.StandardInput.BaseStream.Write($req, 0, $req.Length)
-  $p.StandardInput.Close()
+  # a helper that stops at once (refused, or broken) leaves nobody to read the request
+  try {
+    $p.StandardInput.BaseStream.Write([BitConverter]::GetBytes([int]$req.Length), 0, 4)
+    $p.StandardInput.BaseStream.Write($req, 0, $req.Length)
+    $p.StandardInput.Close()
+  } catch { return "the helper stopped at once: $($p.StandardError.ReadToEnd().Trim())" }
   $out = New-Object IO.MemoryStream
   $p.StandardOutput.BaseStream.CopyTo($out)
   $err = $p.StandardError.ReadToEnd()
@@ -71,11 +79,20 @@ function Test-Helper {
   if ($text -notmatch '"chunk"' -or $text -notmatch '"done"') { return "the helper answered: '$($text.Trim())' $err".Trim() }
   return $null
 }
-$problem = Test-Helper
+$problems = @()
+foreach ($target in $targets) {
+  Register $target
+  $problem = Test-Helper
+  if (-not $problem) { break }
+  $problems += "$(Split-Path -Leaf $target): $problem"
+  if ($target -eq $exe) { Remove-Item -Force -ErrorAction SilentlyContinue $exe }
+}
+foreach ($p in $problems) { Write-Host "Not used: $p" }
 if ($problem) {
-  Write-Host "Self-test FAILED: $problem" -ForegroundColor Red
-  Write-Host 'Firefox will keep asking for local PDFs. Please send this message to the extension''s author.'
+  Write-Host 'Self-test FAILED: no helper could read a PDF here.' -ForegroundColor Red
+  Write-Host 'Firefox will keep asking for local PDFs. Please send these messages to the extension''s author.'
 } else {
+  Write-Host "Installed: $target"
   Write-Host 'Self-test passed: PDFs from this computer now open converted in Firefox without asking.'
   Write-Host '(Reload the PDF tab, or open the PDF again.)'
 }
