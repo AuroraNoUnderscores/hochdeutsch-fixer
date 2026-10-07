@@ -726,6 +726,7 @@
   // "Der Kollege, wo mir hilft" -> "der mir hilft". After a place or a time,
   // "wo" is ordinary German and stays. The last part of a compound decides:
   // "Wohnort" is a place, "Tagesmutter" is not.
+  const LOCATIVE = /^(?:in|an|auf|unter|über|vor|hinter|neben|zwischen|bei)$/i;
   function woPass(tokens) {
     const keep = new RegExp('(?:' + D.syntax.woKeep + ')$', 'i');
     for (let i = 0; i < tokens.length; i++) {
@@ -744,6 +745,11 @@
         d -= 2;
       }
       if (!det) continue;
+      // in a place the noun names ("in der Forschung, wo …", "an der Stelle,
+      // wo …"): a dative after a preposition of place; "wo" is German there too
+      let p = d - 1;
+      while (p >= 0 && !tokens[p].w) p--;
+      if (p >= 0 && LOCATIVE.test(tokens[p].s) && /^(?:dem|der|einem|einer)$/i.test(tokens[d].s)) continue;
       const cells = M.detCells(det);
       const forms = [...new Set(cells.flatMap(({ cell }) => [0, 1, 2].map(c => M.REL[cell][c])))];
       if (!forms.length) continue;

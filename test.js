@@ -122,6 +122,8 @@ const cases = [
   ['Es hat noch viele Leute hier.', 'Es gibt noch viele Leute hier.'],
   ['Der Kollege, wo mir hilft, ist krank.', 'Der Kollege, der mir hilft, ist krank.'],
   ['Die Stadt, wo ich wohne, ist klein.', 'Die Stadt, wo ich wohne, ist klein.'], // a place keeps "wo"
+  ['Es gibt Durchbrüche in der mathematischen Forschung, wo neue Sätze gefunden wurden.', 'Es gibt Durchbrüche in der mathematischen Forschung, wo neue Sätze gefunden wurden.'], // in a place the noun names
+  ['Ich warte auf den Kollegen, wo mir hilft.', 'Ich warte auf den Kollegen, der mir hilft.'], // "auf den": not a place
   ['Er hat ein Ass im Ärmel.', 'Er hat ein Ass im Ärmel.'],
   ['Ich ass zu viel.', 'Ich aß zu viel.'],
   ['Sie sass auf seinem Schoss.', 'Sie saß auf seinem Schoß.'],
