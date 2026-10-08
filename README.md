@@ -303,8 +303,9 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
   took it for. The card sits in a closed shadow root and takes no pointer
   events; Escape or scrolling hides it, a tap shows it on touch screens.
   In a PDF the changed words are tinted too (in the text layer pdf.js lays over
-  the drawn page, so it shows on screen, not in print); the card and the name
-  underline are for web pages only.
+  the drawn page, so it shows on screen, not in print), and pointing at one
+  shows the same card: what the PDF says there and why it changed. The name
+  underline is for web pages only.
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.

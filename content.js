@@ -162,38 +162,8 @@
   const NAME_KINDS = { PER: "a person's name", LOC: 'a place', ORG: 'an organisation' };
   let tip = null, shownKey = null, hideTimer = null, frame = 0, armed = false;
 
-  // A node's choices, with where each sits in the converted text.
-  function choicesOf(rec) {
-    const out = [];
-    let at = 0;
-    for (const p of rec.pieces || []) {
-      const text = typeof p === 'string' ? p : E.renderPieces([p]);
-      if (typeof p === 'object') out.push([at, at + text.length, p]);
-      at += text.length;
-    }
-    return out;
-  }
-
-  function why(rec, a, b, from, to) {
-    const p = choicesOf(rec).find(([s, e]) => s < b && e > a)?.[2];
-    const over = p && p.kind !== 'eszett' && p.rank !== false
-      ? [...new Set(p.options.filter((o, i) => i !== p.pick && o !== to && o.trim()))] : [];
-    if (over.length) {
-      const list = over.slice(0, 3).map(o => `„${o.trim()}“`).join(', ') + (over.length > 3 ? ' …' : '');
-      const by = !llm ? "The rules' pick (model off), over "
-        : rec.ranked ? "The model's pick, over " : "The rules' pick (the model hasn't checked it yet), over ";
-      return by + list;
-    }
-    if (from.replace(/ss/g, 'ß') === to || to.replace(/ß/g, 'ss') === from) return 'Swiss spelling: ss → ß';
-    // Hamburg only where the flavour itself makes the difference: the words
-    // alone, converted both ways (in context the rest may differ for other reasons)
-    if (mode === 'hamburg') {
-      const neutral = E.convert(from, { mode: 'neutral' }).text;
-      if (neutral !== E.convert(from, { mode: 'hamburg' }).text)
-        return neutral === from ? 'Hamburg flavour' : `Hamburg flavour (Neutral: „${neutral}“)`;
-    }
-    return /\s/.test(from) || /\s/.test(to) ? 'Swiss usage' : 'Swiss word';
-  }
+  const choicesOf = rec => E.choicesOf(rec.pieces);
+  const why = (rec, a, b, from, to) => E.explain(rec.pieces, a, b, from, to, { mode, llm, ranked: rec.ranked });
 
   // The changed word or kept name under the pointer, if any. The caret position
   // lands on the nearest text even beside it, so the word's own boxes decide.

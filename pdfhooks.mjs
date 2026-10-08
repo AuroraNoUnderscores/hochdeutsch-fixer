@@ -84,14 +84,15 @@ function keep(drawn, text) {
 }
 
 // An item's text with its edits, and where the changed words are in it, for
-// the highlights (an edit without marks is one changed word as a whole).
+// the highlights: [start, end, info] (an edit without marks is one changed word
+// as a whole; info, what it was and why it changed, is for the card on hover).
 function applyEdits(str, list) {
   if (!list?.length) return { str, marks: [] };
   let out = '', pos = 0;
   const marks = [];
   for (const ed of [...list].sort((a, b) => a.s - b.s)) {
     out += str.slice(pos, ed.s);
-    for (const [a, b] of ed.marks || [[0, ed.t.length]]) if (b > a) marks.push([out.length + a, out.length + b]);
+    for (const [a, b, info = ed.info] of ed.marks || [[0, ed.t.length]]) if (b > a) marks.push([out.length + a, out.length + b, info]);
     out += ed.t;
     pos = ed.e;
   }
@@ -382,7 +383,7 @@ function edited(it, list) {
       const [x, wd] = xs[k];
       out.push({
         item: { ...it, str: str.slice(s, e), transform: at(x), width: last ? wd : xs[k + 1][0] - x, hasEOL: last && eol },
-        marks: marks.filter(([a, b]) => b > s && a < e).map(([a, b]) => [Math.max(a, s) - s, Math.min(b, e) - s]),
+        marks: marks.filter(([a, b]) => b > s && a < e).map(([a, b, info]) => [Math.max(a, s) - s, Math.min(b, e) - s, info]),
       });
     });
   };
@@ -443,34 +444,40 @@ function layerTexts(state) {
 function paint() {
   if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
   const ranges = [];
+  marked.clear();
   if (root.hasAttribute('data-hdfx-highlight')) for (const [div, idx] of layers) {
     const state = ready.get(idx);
     if (!div.isConnected || !state?.edits.length) continue;
-    const want = layerTexts(state);
+    const want = layerTexts(state), here = [];
     div.querySelectorAll('span[role="presentation"]').forEach((span, n) => {
       const node = span.firstChild, o = want[n];
       // a layer from before the model spoke reads otherwise: it is made again
       if (!o?.marks.length || node?.nodeType !== 3 || node.data !== o.str) return;
-      for (const [a, b] of o.marks) {
+      for (const [a, b, info] of o.marks) {
         const r = new Range();
         r.setStart(node, a); r.setEnd(node, b);
         ranges.push(r);
+        if (info) here.push({ range: r, info });
       }
     });
+    if (here.length) marked.set(div, here);
   }
   CSS.highlights.set('hdfx-changed', new Highlight(...ranges));
+  armHover();
 }
 
 // The tint's style, where the layer is: Chrome's viewer has its pages in a
-// shadow root, which no style of the document reaches.
+// shadow root, which no style of the document reaches (nor do its scrolls).
 const styled = new WeakSet();
 function style(div) {
   const where = div.getRootNode();
   if (styled.has(where)) return;
   styled.add(where);
   const el = document.createElement('style');
-  el.textContent = '.textLayer ::highlight(hdfx-changed){background-color:rgba(255,200,0,.45)}';
+  el.textContent = '.textLayer ::highlight(hdfx-changed){background-color:rgba(255,200,0,.45)}'
+    + '.textLayer ::highlight(hdfx-hover){background-color:rgba(255,170,0,.7)}';
   (where === document ? document.head || root : where).append(el);
+  if (where !== document) where.addEventListener('scroll', () => hide(true), { passive: true, capture: true });
 }
 
 function highlightLayer(div, idx) {
@@ -480,6 +487,152 @@ function highlightLayer(div, idx) {
   paint();
 }
 new MutationObserver(paint).observe(root, { attributes: true, attributeFilter: ['data-hdfx-highlight'] });
+
+// ---------- the original, on hover ----------
+// As on web pages (content.js, which does not run in the viewer): pointing at
+// a tinted word shows what the PDF says there and why it changed, in a card in
+// a closed shadow root that takes no pointer events. The words are found by
+// where they are, so the layers may be in a shadow root.
+const marked = new Map();     // text layer div -> [{ range, info }]
+let tip = null, shown = null, hideTimer = null, frame = 0, armed = false;
+
+function hit(x, y) {
+  const inside = r => x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1;
+  for (const [div, list] of marked) {
+    if (!inside(div.getBoundingClientRect())) continue;
+    for (const m of list) {
+      const rect = [...m.range.getClientRects()].find(inside);
+      if (rect) return { ...m, rect };
+    }
+  }
+  return null;
+}
+
+function el(tag, cls, parent) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  parent?.append(e);
+  return e;
+}
+
+function makeTip() {
+  const host = document.createElement('hochdeutsch-fixer-tip');
+  host.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+  const sr = host.attachShadow({ mode: 'closed' });
+  el('style', null, sr).textContent = `
+    :host { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.12); --mark: #e8a200; }
+    @media (prefers-color-scheme: dark) { :host { --bg: #2b2a33; --fg: #fbfbfe; --muted: #a8a8b3; --line: rgba(255,255,255,.14); --mark: #ffc845; } }
+    .card { position: fixed; left: 0; top: 0; max-width: min(320px, calc(100vw - 12px)); box-sizing: border-box; padding: 7px 10px 8px;
+      font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg);
+      border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 6px 20px rgba(0,0,0,.14), 0 1px 3px rgba(0,0,0,.08);
+      opacity: 0; transform: translate3d(var(--x, 0), calc(var(--y, 0) + var(--dy, 4px)), 0);
+      transition: opacity 120ms ease-out, transform 180ms cubic-bezier(.2,.8,.2,1); will-change: transform, opacity; }
+    .card.on { opacity: 1; --dy: 0px; }
+    .card.below { --dy: -4px; }
+    .card.on.below { --dy: 0px; }
+    .card.still { transition: none; }
+    .row { hyphens: auto; overflow-wrap: anywhere; }
+    .from, .to { -webkit-box-decoration-break: clone; box-decoration-break: clone; background-repeat: no-repeat; }
+    .from { color: var(--muted); background-image: linear-gradient(currentColor, currentColor);
+      background-position: 0 56%; background-size: 100% 1.5px; }
+    .card.fresh .from { animation: strike 220ms 70ms cubic-bezier(.4,0,.2,1) both; }
+    @keyframes strike { from { background-size: 0% 1.5px; } }
+    .arrow { color: var(--muted); font-size: 12px; margin: 0 2px 0 5px; }
+    .to { font-weight: 600; padding-bottom: 1px; background-image: linear-gradient(var(--mark), var(--mark));
+      background-position: 0 100%; background-size: 100% 2px; }
+    .note { margin-top: 3px; font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+    .note:empty { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .card { transition: opacity 100ms linear; transform: translate3d(var(--x, 0), var(--y, 0), 0); }
+      .card.fresh .from { animation: none; }
+    }`;
+  const card = el('div', 'card', sr);
+  card.setAttribute('role', 'tooltip');
+  card.lang = 'de';                          // German hyphenation for long compounds
+  const row = el('div', 'row', card);
+  const from = el('span', 'from', row);
+  el('span', 'arrow', row).textContent = '→ ';   // the arrow stays with the new word
+  const to = el('span', 'to', row);
+  const note = el('div', 'note', card);
+  root.append(host);
+  return { host, card, from, to, note };
+}
+
+function show(h) {
+  clearTimeout(hideTimer);
+  if (h.range === shown && tip?.card.classList.contains('on')) return;
+  tip ||= makeTip();
+  if (!tip.host.isConnected) root.append(tip.host);
+  const { card, from, to, note } = tip;
+  const wasOn = card.classList.contains('on');
+  shown = h.range;
+  from.textContent = h.info.from || '∅';
+  to.textContent = h.info.to || '∅';
+  note.textContent = h.info.note || '';
+  // above the word, or below it at the top of the window
+  const w = card.offsetWidth, ht = card.offsetHeight, gap = 8;
+  const x = Math.round(Math.max(6, Math.min(h.rect.left + h.rect.width / 2 - w / 2, innerWidth - w - 6)));
+  let y = Math.round(h.rect.top - ht - gap);
+  const below = y < 6;
+  if (below) y = Math.round(h.rect.bottom + gap);
+  // from word to word it glides; out of nowhere it fades in where it belongs
+  if (!wasOn) { card.classList.add('still'); card.classList.toggle('below', below); }
+  card.style.setProperty('--x', x + 'px');
+  card.style.setProperty('--y', y + 'px');
+  card.classList.remove('fresh');
+  void card.offsetWidth;                       // start the strike again
+  card.classList.add('fresh');
+  if (!wasOn) { card.classList.remove('still'); void card.offsetWidth; }
+  card.classList.add('on');
+  const hl = new Highlight(h.range);
+  hl.priority = 1;
+  CSS.highlights.set('hdfx-hover', hl);
+}
+
+function hide(now) {
+  clearTimeout(hideTimer);
+  const go = () => {
+    shown = null;
+    tip?.card.classList.remove('on', 'fresh');
+    globalThis.CSS?.highlights?.delete('hdfx-hover');
+  };
+  // a short grace, so the card glides between neighbouring words instead of blinking
+  if (now) go(); else hideTimer = setTimeout(go, 90);
+}
+
+function onMove(e) {
+  if (e.pointerType === 'touch') return;
+  const { clientX: x, clientY: y } = e;
+  cancelAnimationFrame(frame);
+  frame = requestAnimationFrame(() => {
+    const h = hit(x, y);
+    h ? show(h) : hide();
+  });
+}
+const onTap = e => {
+  if (e.pointerType !== 'touch') return;
+  const h = hit(e.clientX, e.clientY);
+  h ? show(h) : hide(true);
+};
+const onKey = e => { if (e.key === 'Escape') hide(true); };
+const onAway = () => hide(true);
+
+// Listening only while there is something tinted to point at.
+function armHover() {
+  const want = marked.size > 0;
+  if (want !== armed) {
+    armed = want;
+    const add = want ? addEventListener : removeEventListener;
+    add('pointermove', onMove, { passive: true, capture: true });
+    add('pointerdown', onTap, { passive: true, capture: true });
+    add('keydown', onKey, true);
+    add('scroll', onAway, { passive: true, capture: true });
+    add('wheel', onAway, { passive: true, capture: true });
+    add('blur', onAway);
+  }
+  // the word under the card may be gone (a page drawn again, highlights off)
+  if (shown && ![...marked.values()].some(l => l.some(m => m.range === shown))) hide(true);
+}
 
 globalThis.__hdfx = { prepare, canvas, textStream };
 export { prepare, canvas, textStream, highlightLayer };

@@ -131,7 +131,8 @@ globalThis.HD_PDFTEXT = (() => {
     return p;
   }
 
-  // Edits in a paragraph's text, as edits of the items it was made from.
+  // Edits in a paragraph's text, as edits of the items it was made from. An
+  // edit's info (what it was, why it changed) goes with what it became.
   function toItems(edits, { text, from }) {
     const out = [];
     const local = (s, e, t) => {
@@ -147,7 +148,7 @@ globalThis.HD_PDFTEXT = (() => {
     for (const ed of edits) {
       const groups = local(ed.s, ed.e);
       if (!groups) continue;
-      if (groups.length === 1) { out.push({ ...groups[0], t: ed.t }); continue; }
+      if (groups.length === 1) { out.push({ ...groups[0], t: ed.t, info: ed.info }); continue; }
       // Spread over several items: word by word, when the words still pair up.
       const words = [...text.slice(ed.s, ed.e).matchAll(/\S+/g)];
       const newWords = ed.t.split(/\s+/).filter(Boolean);
@@ -157,16 +158,17 @@ globalThis.HD_PDFTEXT = (() => {
           if (w[0] === newWords[n]) return;
           const parts = local(s, e);
           if (!parts) return;
-          if (parts.length === 1) { out.push({ ...parts[0], t: newWords[n] }); return; }
+          const info = ed.info && { ...ed.info, from: w[0], to: newWords[n] };
+          if (parts.length === 1) { out.push({ ...parts[0], t: newWords[n], info }); return; }
           // a word hyphenated over two lines
           const firstLen = parts[0].e - parts[0].s;
           const cut = splitAt(w[0], newWords[n], firstLen);
-          out.push({ ...parts[0], t: newWords[n].slice(0, cut) });
-          out.push({ ...parts[1], t: newWords[n].slice(cut) });
+          out.push({ ...parts[0], t: newWords[n].slice(0, cut), info });
+          out.push({ ...parts[1], t: newWords[n].slice(cut), info });
           for (const extra of parts.slice(2)) out.push({ ...extra, t: '' });
         });
       } else {
-        out.push({ ...groups[0], t: ed.t });
+        out.push({ ...groups[0], t: ed.t, info: ed.info });
         for (const g of groups.slice(1)) out.push({ ...g, t: '' });
       }
     }
@@ -234,7 +236,7 @@ globalThis.HD_PDFTEXT = (() => {
     };
   }
 
-  function reflow(items, { para, text: was }, text, column, open) {
+  function reflow(items, { para }, text, diffs, column, open) {
     const lines = para.map(l => l.filter(i => items[i].str.trim())).filter(l => l.length);
     if (!lines.length) return null;
     const its = lines.flat().map(i => items[i]);
@@ -255,19 +257,21 @@ globalThis.HD_PDFTEXT = (() => {
     const justified = geo.length > 1 && geo.slice(0, -1).every(g => right - g.x1 < 2);
     const words = text.trim().split(/\s+/);
     // Which of the new words are changed ones, and where they are in a line of
-    // words a to b, for the highlights; neighbours are one mark with their space.
-    let delta = 0;
-    const spans = differences(was, text).map(d => { const s = d.s + delta; delta += d.t.length - (d.e - d.s); return [s, s + d.t.length]; });
+    // words a to b, for the highlights: [start, end, info] (what it was, why it
+    // changed); neighbours from one change are one mark with their space.
     const changed = [...text.matchAll(/\S+/g)].map(m => {
-      const on = spans.filter(([a, b]) => a < m.index + m[0].length && b > m.index);
-      return on.length ? [Math.max(0, on[0][0] - m.index), Math.min(m[0].length, on[on.length - 1][1] - m.index)] : null;
+      const on = diffs.filter(d => d.a < m.index + m[0].length && d.b > m.index);
+      if (!on.length) return null;
+      const first = on[0], last = on[on.length - 1];
+      const info = on.length === 1 ? first.info : { ...first.info, from: on.map(d => d.info.from).join(' … '), to: text.slice(first.a, last.b) };
+      return [Math.max(0, first.a - m.index), Math.min(m[0].length, last.b - m.index), info];
     });
     const marks = (a, b) => {
       const out = [];
       for (let n = a, at = 0; n < b; at += words[n++].length + 1) {
         if (!changed[n]) continue;
-        const [lo, hi] = changed[n], last = out[out.length - 1];
-        if (last && lo === 0 && last[1] === at - 1) last[1] = at + hi; else out.push([at + lo, at + hi]);
+        const [lo, hi, info] = changed[n], last = out[out.length - 1];
+        if (last && lo === 0 && last[1] === at - 1 && last[2] === info) last[1] = at + hi; else out.push([at + lo, at + hi, info]);
       }
       return out;
     };
@@ -372,8 +376,11 @@ globalThis.HD_PDFTEXT = (() => {
     const column = columns(items);
     const open = openRight(items, view);
     const room = lineRoom(items, column);
-    const editsNow = () => jobs.flatMap(j => j.text === j.asm.text ? []
-      : reflow(items, j.asm, j.text, column, open) || toItems(differences(j.asm.text, j.text), j.asm).map(ed => ({ ...ed, ...room.get(ed.i) })));
+    const editsNow = () => jobs.flatMap(j => {
+      if (j.text === j.asm.text) return [];
+      const diffs = describe(j);
+      return reflow(items, j.asm, j.text, diffs, column, open) || toItems(diffs, j.asm).map(ed => ({ ...ed, ...room.get(ed.i) }));
+    });
     const choices = settings.llm && jobs.some(j => j.r.pieces.some(p => typeof p === 'object'));
     let answered = false;
     // A final answer carries the page's list of changes (a cache may keep it);
@@ -388,12 +395,26 @@ globalThis.HD_PDFTEXT = (() => {
       try {
         await E.resolve(j.r.pieces, rankJobs => browser.runtime.sendMessage({ type: 'rank', jobs: rankJobs }));
         j.text = E.renderPieces(j.r.pieces);
+        j.ranked = true;
       } catch { /* background not available: the rules' text stands */ }
     }
     clearTimeout(timer);
     tally(idx, jobs);
     if (!answered) answer(2, true);
     else redraw({ page: idx, edits: editsNow(), version: 2, changes: perPage.get(idx) });
+  }
+
+  // A paragraph's differences, each with where it is in the new text (a to b)
+  // and its info for the card over a changed word: what the PDF says, what it
+  // reads now, and why (as on web pages, content.js).
+  function describe(j) {
+    let delta = 0;
+    return differences(j.asm.text, j.text).map(d => {
+      const a = d.s + delta, b = a + d.t.length, from = j.asm.text.slice(d.s, d.e);
+      delta += d.t.length - (d.e - d.s);
+      const note = globalThis.HD_ENGINE.explain(j.r.pieces, a, b, from, d.t, { mode: settings.mode, llm: settings.llm, ranked: j.ranked });
+      return { ...d, a, b, info: { from, to: d.t, note } };
+    });
   }
 
   // What changed on each page, for the popup's count and list.
