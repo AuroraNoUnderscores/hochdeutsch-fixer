@@ -70,6 +70,20 @@ const text = edits => edits.filter(e => e.t).map(e => e.t).join(' ');
   check('every changed word is marked, and nothing else', marked.length > 0 && marked.every(w => w === 'Fahrrad'), JSON.stringify(marked));
   const count = lines.reduce((n, e) => n + (e.t.match(/Fahrrad/g) || []).length, 0);
   check('as often as it is there', marked.length === count, `${marked.length} marks, ${count} times Fahrrad`);
+  const infos = lines.flatMap(e => e.marks.map(m => m[2]));
+  check('each mark says what it was, and why, for the card on hover',
+    infos.every(i => i?.from === 'Velo' && i.to === 'Fahrrad' && i.note === 'Swiss word'), JSON.stringify(infos[0]));
+}
+
+// 4. A word changed in its line (a paragraph in two fonts is not reset) says so too.
+{
+  const items = [
+    { str: 'Das Velo steht ', eol: false, t: [12, 0, 0, 12, 50, 700], w: 90, h: 12, f: 'f1', ff: 'serif' },
+    { str: 'vor dem Haus.', eol: false, t: [12, 0, 0, 12, 140, 700], w: 80, h: 12, f: 'f2', ff: 'serif' },
+  ];
+  const edits = await new Promise(resolve => T.convertPage({ page: 1, items, view: [0, 0, 600, 800] }, ({ edits }) => resolve(edits), () => {}));
+  check('an edit in place carries its info', edits.length === 1 && edits[0].t === 'Fahrrad' && edits[0].info?.from === 'Velo' && edits[0].info.note === 'Swiss word',
+    JSON.stringify(edits));
 }
 
 console.log(failures ? `\n${failures} failed` : '\nall passed');

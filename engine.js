@@ -875,6 +875,43 @@
   const countChoices = pieces =>
     pieces.filter(p => typeof p === 'object' && pieceText(p) !== p.orig).length;
 
+  // A text's choices, with where each sits in the converted text.
+  function choicesOf(pieces) {
+    const out = [];
+    let at = 0;
+    for (const p of pieces || []) {
+      const text = typeof p === 'string' ? p : renderPieces([p]);
+      if (typeof p === 'object') out.push([at, at + text.length, p]);
+      at += text.length;
+    }
+    return out;
+  }
+
+  // Why the converted text's a to b reads `to` where the original read `from`,
+  // for the card shown over a changed word: a rule, the model's pick (and what
+  // it picked over), or the ss/ß spelling. opts: the mode and whether the model
+  // is on (llm) and has answered for this text (ranked).
+  function explain(pieces, a, b, from, to, { mode = 'hamburg', llm = true, ranked = false } = {}) {
+    const p = choicesOf(pieces).find(([s, e]) => s < b && e > a)?.[2];
+    const over = p && p.kind !== 'eszett' && p.rank !== false
+      ? [...new Set(p.options.filter((o, i) => i !== p.pick && o !== to && o.trim()))] : [];
+    if (over.length) {
+      const list = over.slice(0, 3).map(o => `„${o.trim()}“`).join(', ') + (over.length > 3 ? ' …' : '');
+      const by = !llm ? "The rules' pick (model off), over "
+        : ranked ? "The model's pick, over " : "The rules' pick (the model hasn't checked it yet), over ";
+      return by + list;
+    }
+    if (from.replace(/ss/g, 'ß') === to || to.replace(/ß/g, 'ss') === from) return 'Swiss spelling: ss → ß';
+    // Hamburg only where the flavour itself makes the difference: the words
+    // alone, converted both ways (in context the rest may differ for other reasons)
+    if (mode === 'hamburg') {
+      const neutral = convert(from, { mode: 'neutral' }).text;
+      if (neutral !== convert(from, { mode: 'hamburg' }).text)
+        return neutral === from ? 'Hamburg flavour' : `Hamburg flavour (Neutral: „${neutral}“)`;
+    }
+    return /\s/.test(from) || /\s/.test(to) ? 'Swiss usage' : 'Swiss word';
+  }
+
   // Is this text written in German spelling? Swiss spelling has no ß, so text
   // with ß (at least `min` of them) and hardly any ss where the rules expect ß
   // was written in Germany or Austria: its ss choices are the writer's own, and a
@@ -1039,7 +1076,7 @@
     return out;
   }
 
-  const api = { convert, candidates, renderPieces, resolve, countChoices, isMeta, germanSpelling, matchCase };
+  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);
