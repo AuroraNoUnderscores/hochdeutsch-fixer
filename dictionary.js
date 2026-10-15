@@ -18,6 +18,9 @@
 //   meaning (Busse = fine or buses); the language model decides.
 // ss: stems where Swiss "ss" is "ß" in Germany ("stem!exceptionRegex").
 //   Other ss-words go to the language model unless listed in ssKeep.
+// A text about the liturgy: "das Lavabo nach der Gabenbereitung" is the priest's
+// hand-washing, "the Catholic Mass" no Maß.
+const LITURGY = 'messe\\b|gottesdienst|liturg|eucharist|kirche|kirchlich|church|catholic|katholisch|priest|pfarr|parish|zelebr|celebrant|ministrant|altar|gabenbereitung|offertor|kommunion|communion|homil|predigt|sermon|kyrie|sanctus|agnus dei|requiem|tridentin|novus ordo|sakrist|sacrist|hostie|kelch|chalice|psalm|ritus|\\brite\\b';
 globalThis.HD_DICT = {
   nouns: [
     // Verkehr
@@ -456,7 +459,7 @@ globalThis.HD_DICT = {
     ['rahm', 'Sahne', '^rahm(en|ung)'], ['einstellhallen', 'Tiefgaragen'], ['renovations', 'Renovierungs'],
     ['reservations', 'Reservierungs'], ['bewilligungs', 'Genehmigungs'], ['pikett', 'Bereitschafts'],
     ['primarlehr', 'Grundschullehr'], ['medienmitteilungs', 'Pressemitteilungs'],
-    ['offert', 'Angebots', '^offerte'], ['annullations', 'Stornierungs'], ['töff', 'Motorrad'],
+    ['offert', 'Angebots', '^offert(?:e|or)'], ['annullations', 'Stornierungs'], ['töff', 'Motorrad'],
     ['rinds', 'Rinder', '^rindsleder'],
   ],
 
@@ -486,8 +489,9 @@ globalThis.HD_DICT = {
     // general model may keep the original where it reads clearly better.
     'estrich,estriche,estrichs': {
       pro: 'keller|dachboden|dachstock|dachschräg|estrichabteil|estrichtreppe|estrichleiter|stauraum|abstellraum|verstau|kisten|kartons|flohmarkt|brocki|entrümpel|mansarde|schopf',
-      contra: 'estrichleger|zementestrich|anhydrit|fliessestrich|fließestrich|trockenestrich|fussbodenheizung|fußbodenheizung|trittschall|dämmung|fliesen|parkett|bodenbelag|beton|schleif|giess|gieß|gegossen|risse|trockn|verleg|untergrund|belegreif|restfeuchte|nivellier|mörtel|kleber|baustoff',
+      contra: 'estrichleger|zementestrich|anhydrit|fliessestrich|fließestrich|trockenestrich|fussbodenheizung|fußbodenheizung|trittschall|dämmung|fliesen|parkett|bodenbelag|beton|schleif|giess|gieß|gegossen|risse|trockn|verleg|untergrund|belegreif|restfeuchte|nivellier|mörtel|kleber|baustoff|unterlagsboden|bodenaufbau|zement|calciumsulfat|heizestrich|gussasphalt|aushärt|abbind|begehbar|schicht|\\d\\s*(?:mm|cm)\\b|millimeter|zentimeter|quadratmeter|m²|rohbau|neubau|sanier|bodenleger|plattenleger|fliesenleger|belag|wohnzimmer|küche|badezimmer|erdgeschoss|frisch|floor|screed',
     },
+    'lavabo,lavabos': { contra: LITURGY },
     kübel: {
       pro: 'abfall|kehricht|putzkübel|putzmittel|müll|grünabfuhr|kompost|notdurft|güsel',
       contra: 'pflanz|topf|töpfe|garten|balkon|terrasse|erde|substrat|blumen|kräuter|gewächs|hochbeet|blüh|wurzel',
@@ -585,6 +589,8 @@ globalThis.HD_DICT = {
       pro: 'franken|chf|bezahl|zahlen|zahlt|verhängt|richter|polizei|strafe|verwarn|delikt|ordnungs|geschwindigkeit|tempo|zu schnell|parkier|falschpark|übertret|widerhandl|gericht',
       contra: 'fahren|fährt|haltestelle|fahrplan|linie|chauffeur|verkehrsbetrieb|postauto|bahnhof|umsteig|reisebus|abfahrt|fahrgast|passagier|streik|innenstadt|\\böv\\b',
     },
+    // "Mass" is the Mass in a text about the liturgy, kept outright (hard).
+    mass: { contra: LITURGY + '|(?:sunday|saturday|christmas|easter|midnight|vigil|evening|morning|daily|holy|latin)\\s+mass|mass\\s+(?:on|at|in|for|of)\\b', hard: true },
     'masse,massen': {
       pro: 'fenster|zimmer|raum|länge|breite|höhe|tiefe|messen|gemessen|zentimeter|millimeter|\\bmeter\\b|\\bcm\\b|\\bmm\\b|abmessung|zuschneiden|schrank|tisch|platte|koffer|gepäck|passt|passen|nahm|nehmen|schneider|möbel',
       contra: 'menschen|menge|leute|publikum|zuschauer|besucher|fans|konzert|stadion|demonstr|strömte|strömen|drängt|kilogramm|gewicht|teig|flüssig|molekül|atom|kritische|erdmasse|muskel|stand',

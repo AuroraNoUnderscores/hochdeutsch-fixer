@@ -359,7 +359,9 @@
     if (!info || Math.abs(info.len - len) > 40) {
       const text = visibleText(el);
       const hits = (text.match(GERMAN) || []).length;
-      info = { len, text, german: hits >= 2 || (hits >= 1 && /[äöüßÄÖÜ]/.test(text)), eszett: E.germanSpelling(text) };
+      // "was", "man", "die" are English too: an English block is not German
+      const german = (hits >= 2 || (hits >= 1 && /[äöüßÄÖÜ]/.test(text))) && !E.english(text);
+      info = { len, text, german, eszett: E.germanSpelling(text) };
       blocks.set(el, info);
     }
     return info;

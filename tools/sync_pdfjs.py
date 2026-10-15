@@ -122,9 +122,13 @@ HOOKS = [
     # 2. Drawn text: the glyphs of a changed word are swapped, the run keeps its width.
     ("  showText(opIdx, glyphs) {\n    if (this.dependencyTracker) {",
      "  showText(opIdx, glyphs) {\n    const hd = this.__hdfx?.(this, glyphs);\n    if (hd) {\n      const c = this.current, h = c.textHScale, x0 = c.x, y0 = c.y;\n      c.textHScale = h * hd.scale;\n      try {\n        this.__hdfxShowText(opIdx, hd.glyphs);\n      } finally {\n        c.textHScale = h;\n      }\n      if (hd.more?.length) {\n        const x1 = c.x, y1 = c.y;\n        for (const m of hd.more) {\n          c.x = x0; c.y = y0 + m.dy; c.textHScale = h * m.scale;\n          try { this.__hdfxShowText(opIdx, m.glyphs); } finally { c.textHScale = h; }\n        }\n        c.x = x1; c.y = y1;\n      }\n      return;\n    }\n    return this.__hdfxShowText(opIdx, glyphs);\n  }\n  __hdfxShowText(opIdx, glyphs) {\n    if (this.dependencyTracker) {"),
-    # 2b. A letter the document's font does not have is drawn in the installed font of its family.
+    # 2b. A letter the document's font does not have is drawn in the installed font of its family,
+    # also in text pdf.js would draw as outlines (stroked, pattern-filled, no font face), which
+    # takes the letter from the document's font: that has none. Nor is it measured in that font.
+    ("      if (font.remeasure && width > 0) {",
+     "      if (font.remeasure && width > 0 && !glyph.hdfxFont) {"),
     ("        if (simpleFillText && !accent) {\n          ctx.fillText(character, scaledX, scaledY);",
-     "        if (simpleFillText && !accent) {\n          if (glyph.hdfxFont) {\n            const f = ctx.font;\n            ctx.font = glyph.hdfxFont(f);\n            ctx.fillText(character, scaledX, scaledY);\n            ctx.font = f;\n          } else\n          ctx.fillText(character, scaledX, scaledY);"),
+     "        if ((simpleFillText || glyph.hdfxFont) && !accent) {\n          if (glyph.hdfxFont) {\n            const f = ctx.font;\n            ctx.font = glyph.hdfxFont(f);\n            if (needsFill) ctx.fillText(character, scaledX, scaledY);\n            if (needsStroke) ctx.strokeText(character, scaledX, scaledY);\n            ctx.font = f;\n          } else\n          ctx.fillText(character, scaledX, scaledY);"),
     # 3. Selectable and searchable text (the text layer) reads the rewritten words.
     ("  streamTextContent({\n    includeMarkedContent = false,\n    disableNormalization = false\n  } = {}) {\n",
      "  streamTextContent({\n    includeMarkedContent = false,\n    disableNormalization = false,\n    __hdfxRaw = false\n  } = {}) {\n    if (!__hdfxRaw && globalThis.__hdfx) return globalThis.__hdfx.textStream(this, { includeMarkedContent, disableNormalization });\n"),
