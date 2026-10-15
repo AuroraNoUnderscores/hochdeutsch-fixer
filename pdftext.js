@@ -6,8 +6,6 @@
 globalThis.HD_PDFTEXT = (() => {
   // ---------- converting the text, page by page ----------
 
-  const GERMAN = /(?<!\p{L})(?:der|die|das|den|dem|des|und|ist|sind|war|nicht|mit|für|ein|eine|einen|einem|von|zu|zum|zur|auf|sich|wir|wird|werden|auch|aber|oder|im|am|beim|vom|bei|dass|haben|hat|habe|hast|hatte|kann|muss|nach|über|nur|noch|wie|was|schon|sehr|man|als|wenn|ich|mir|mich|dir|uns|euch|bin|bist|mein|meine|dein|sein|seine|kein|keine|wurde|bitte|danke|viele|heute|gestern|jetzt|hier|dort)(?!\p{L})/giu;
-  const germanish = t => { const n = (t.match(GERMAN) || []).length; return n >= 2 || (n >= 1 && /[äöüÄÖÜ]/.test(t)); };
   let settings = null;
   const engine = () => new Promise(resolve => {
     const tick = () => (globalThis.HD_ENGINE ? resolve(globalThis.HD_ENGINE) : setTimeout(tick, 20));
@@ -365,12 +363,14 @@ globalThis.HD_PDFTEXT = (() => {
     const docText = [...pagesText.values()].join(' ').slice(0, 20000);
     if (E.isMeta(pageText, 'page')) return reply({ edits: [], version: 1, changes: [] });
     const german = E.germanSpelling(docText, 3);
-    const docGerman = germanish(docText);
+    const german_ = t => E.language(t).lang === 'de';
+    const docGerman = german_(docText);
+    const swiss = E.swissSigns(docText) > 0;
     const jobs = [];
     for (const para of paragraphs(items)) {
       const asm = assemble(items, para);
-      if (!asm.text.trim() || !(docGerman || germanish(asm.text))) continue;
-      const r = E.convert(asm.text, { mode: settings.mode, context: pageText, german: german || E.germanSpelling(asm.text) });
+      if (!asm.text.trim() || !(docGerman || german_(asm.text))) continue;
+      const r = E.convert(asm.text, { mode: settings.mode, context: pageText, german: german || E.germanSpelling(asm.text), swiss });
       jobs.push({ asm, r, text: r.text });
     }
     const column = columns(items);
