@@ -16,7 +16,7 @@ globalThis.document = {
 globalThis.MutationObserver = class { observe() {} };
 globalThis.CustomEvent = class { constructor(type, o) { this.type = type; this.detail = o?.detail; } };
 globalThis.OffscreenCanvas = class { getContext() { return { font: '', measureText: t => ({ width: t.length * 50 }) }; } };
-const { prepare, canvas } = await import('../../pdfhooks.mjs');
+const { prepare, canvas, textStream } = await import('../../pdfhooks.mjs');
 
 let failures = 0;
 const check = (name, got, want) => {
@@ -67,6 +67,37 @@ check('a reflowed line keeps its label and is set in the run after it', drawn.sl
 // A line drawn in one run is replaced whole, as before.
 const one = await page(1, [['Mit dem Velo zur Arbeit.', true, 72, 130]], [{ i: 0, s: 0, e: 24, t: 'Mit dem Fahrrad zur Arbeit.', of: 0, line: { justify: false, width: 130, cap: 450 } }], ['Mit dem Velo zur Arbeit.']);
 check('a line in one run', one, ['Mit dem Fahrrad zur Arbeit.']);
+
+// A word changed in place that grows at the end of its line: the text layer
+// gets the item as wide as it was drawn, so its highlight lies on the word.
+{
+  answer = { edits: [{ i: 0, s: 9, e: 13, t: 'Fahrrad', lineLast: 0, room: 100 }], version: 1 };
+  const items = [{ str: 'Er fährt Velo', hasEOL: true, transform: [12, 0, 0, 12, 72, 0], width: 72, height: 12, fontName: 'f1' }];
+  const pg = { _pageIndex: 2, view: [0, 0, 600, 800], getTextContent: async () => ({ items, styles: {} }),
+    streamTextContent: () => new ReadableStream({ start(c) { c.enqueue({ items: items.map(it => ({ ...it })), styles: {} }); c.close(); } }) };
+  await prepare(pg);
+  const hook = canvas(pg, { fnArray: [], argsArray: [] });
+  const gfx = { current: { font: { loadedName: 'f1', name: 'Test' }, fontSize: 12, fontMatrix: [0.001], charSpacing: 0, wordSpacing: 0 } };
+  const glyph = ch => (ch === ' ' ? -250 : { unicode: ch, fontChar: ch, width: 500, isSpace: false, isInFont: true });
+  hook(gfx, [...'Er fährt Velo'].map(glyph));
+  const reader = textStream(pg, { disableNormalization: true }).getReader();
+  const { value } = await reader.read();
+  check('a grown word: the text layer item as wide as drawn', value.items.map(it => [it.str, Math.round(it.width), it.transform[4]]), [['Er fährt Fahrrad', 90, 72]]);
+}
+
+// A letter the font lacks, from the installed font, measured in the font's own
+// units: 1000 per em here, 500 for a font whose fontMatrix is 0.002.
+{
+  answer = { edits: [{ i: 0, s: 0, e: 4, t: 'Maß' }], version: 1 };
+  for (const [idx, fm, want] of [[3, 0.001, 500], [4, 0.002, 250]]) {
+    const pg = { _pageIndex: idx, view: [0, 0, 600, 800], getTextContent: async () => ({ items: [{ str: 'Mass', transform: [12, 0, 0, 12, 0, 0], width: 24, height: 12, fontName: 'f' + idx }], styles: {} }) };
+    await prepare(pg);
+    const font = { loadedName: 'f' + idx, name: 'Test', fontMatrix: [fm] };
+    const gfx = { current: { font, fontSize: 12, fontMatrix: [fm], charSpacing: 0, wordSpacing: 0 } };
+    const r = canvas(pg, { fnArray: [], argsArray: [] })(gfx, [...'Mass'].map(ch => ({ unicode: ch, fontChar: ch, width: 0.5 / fm, isSpace: false, isInFont: true })));
+    check(`ß from the installed font, fontMatrix ${fm}`, r.glyphs.find(g => g.unicode === 'ß')?.width, want);
+  }
+}
 
 console.log(failures ? `${failures} failed` : 'all passed');
 process.exit(failures ? 1 : 0);
