@@ -96,17 +96,32 @@
     return strong >= 1 || clear >= 2 || (clear >= 1 && weak >= 1);
   }
 
+  // English inside German text (a quote, a comment, a song title): "that was a
+  // long-ass tunnel" holds no "aß". Words both languages use (was, man, die, war,
+  // an, so, will) count for neither.
+  const EN_WORDS = /(?<!\p{L})(?:the|a|and|of|to|is|are|were|be|been|this|that|these|those|it|its|it's|you|your|he|she|we|they|my|our|their|with|for|on|at|by|from|have|has|had|not|but|or|if|just|like|what|which|who|would|could|should|don't|didn't|can't|i'm|there|about|into|out|very|really|some|any|how|when|than|then|one)(?!\p{L})/giu;
+  const DE_WORDS = /(?<!\p{L})(?:der|das|den|dem|des|und|ist|sind|nicht|mit|für|ein|eine|einen|einem|einer|von|zu|zum|zur|auf|sich|wir|wird|werden|auch|aber|oder|im|beim|vom|bei|dass|haben|hat|habe|hatte|kann|muss|nach|über|nur|noch|wie|schon|sehr|als|wenn|ich|mir|mich|uns|bin|bist|mein|sein|kein|keine|wurde|bitte|viele|heute|jetzt|hier|dort|es|er|sie)(?!\p{L})/giu;
+  function english(text) {
+    const en = (text.match(EN_WORDS) || []).length;
+    if (en < 2) return false;
+    return en > 2 * (text.match(DE_WORDS) || []).length;
+  }
+
   // Per-sentence verdicts for one text, so one explaining sentence in an
-  // ordinary paragraph suppresses only itself.
+  // ordinary paragraph suppresses only itself, and an English one is left alone.
   function metaSentences(text) {
     const spans = [];
     const re = /[.!?]+(?:\s|$)/g;
     let start = 0, m;
+    const span = (a, b) => {
+      const s = text.slice(a, b);
+      return { end: b, meta: isMeta(s, 'sentence') || english(s) };
+    };
     while ((m = re.exec(text))) {
-      spans.push({ end: re.lastIndex, meta: isMeta(text.slice(start, re.lastIndex), 'sentence') });
+      spans.push(span(start, re.lastIndex));
       start = re.lastIndex;
     }
-    if (start < text.length) spans.push({ end: text.length, meta: isMeta(text.slice(start), 'sentence') });
+    if (start < text.length) spans.push(span(start, text.length));
     return spans;
   }
 
@@ -190,7 +205,7 @@
     for (const [name, src] of [['cues', D.cues], ['ssCues', D.ssCues]])
       for (const [keys, cue] of Object.entries(src || {}))
         for (const k of keys.split(','))
-          t[name].set(k, { pro: cue.pro && new RegExp(cue.pro, 'i'), contra: cue.contra && new RegExp(cue.contra, 'i') });
+          t[name].set(k, { pro: cue.pro && new RegExp(cue.pro, 'i'), contra: cue.contra && new RegExp(cue.contra, 'i'), hard: !!cue.hard });
     return (tableCache[mode] = t);
   }
 
@@ -317,7 +332,7 @@
       const tok = tokens[i];
       if (!tok.w || quoted(tokens, i)) continue;
       while (span < spans.length - 1 && tok.at >= spans[span].end) span++;
-      if (spans[span]?.meta) continue; // this sentence is explaining a word
+      if (spans[span]?.meta) continue; // this sentence is explaining a word, or English
       const sentence = text.slice(span ? spans[span - 1].end : 0, spans[span]?.end ?? text.length);
       const w = tok.w;
       const noun = findNoun(t, w);
@@ -345,7 +360,11 @@
         continue;
       }
       const lower = w.toLowerCase();
+      // "long-ass", "bad-ass": a German verb never hangs off a hyphen.
+      if (D.ssCase?.[lower] && w === lower && tokens[i - 1]?.s === '-' && tokens[i - 2]?.w) continue;
       if (D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { tok.zuegeln = true; continue; }
+      // A hard cue keeps the word outright: "Mass" in a text about the liturgy.
+      if (t.ssCues.get(lower)?.hard && decide(t.ssCues.get(lower), sentence) === 0) continue;
       const compounded = compound(t, w);
       // Text that already spells ß chose every ss itself.
       const rule = german ? compounded : ssRule(t, w, compounded, tok, text, haystack, sentence, decide);
@@ -1076,7 +1095,7 @@
     return out;
   }
 
-  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, matchCase };
+  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, english, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);

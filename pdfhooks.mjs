@@ -107,7 +107,7 @@ function prepare(page) {
       const items = tc.items.filter(it => typeof it.str === 'string');
       const lite = items.map(it => ({ str: it.str, eol: !!it.hasEOL, t: it.transform, w: it.width, h: it.height, f: it.fontName, ff: tc.styles[it.fontName]?.fontFamily }));
       const { edits = [], version = 0 } = (await ask('page', { page: idx, items: lite, view: page.view })) || {};
-      const state = { items, edits, version, ...buildKeys(items, edits) };
+      const state = { items, edits, version, view: page.view, ...buildKeys(items, edits) };
       ready.set(idx, state);
       return state;
     })().catch(err => { console.error('[Hochdeutsch-Fixer]', err); return null; }));
@@ -122,7 +122,7 @@ export const onRedraw = fn => redrawers.push(fn);
 function redraw({ page: idx, edits, version }) {
   const old = ready.get(idx);
   if (!old || old.version >= version) return;
-  const state = { items: old.items, edits, version, ...buildKeys(old.items, edits) };
+  const state = { items: old.items, edits, version, view: old.view, ...buildKeys(old.items, edits) };
   ready.set(idx, state);
   pages.set(idx, Promise.resolve(state));
   for (const fn of redrawers) fn(idx);
@@ -197,7 +197,8 @@ function fallbackGlyph(ch, font, spaceWidth) {
   if (/\s/.test(ch)) return null;
   const st = styleOf(font);
   measureCtx.font = st.css('100px');
-  const width = measureCtx.measureText(ch).width * 10;
+  // in the font's own glyph units (1000 per em for most fonts, not all: fontMatrix)
+  const width = measureCtx.measureText(ch).width / 100 / (font.fontMatrix?.[0] || 0.001);
   return {
     fontChar: ch, unicode: ch, width: width || spaceWidth * 2, isSpace: false, isInFont: true, accent: null, vmetric: null,
     hdfxFont: current => st.css(/\d+(?:\.\d+)?px/.exec(current)?.[0] || '10px'),
@@ -237,6 +238,10 @@ function canvas(page, operatorList) {
       if (p < 0 || (k.length < 4 && state.keys.indexOf(k, p + 1) >= 0)) return null;
     }
     const end = p + k.length;
+    // the item each glyph belongs to (spaces and kerning go with the one before)
+    const gItem = [];
+    owner.forEach((gi, kk) => { gItem[gi] ??= state.keyItem[p + kk]; });
+    for (let gi = 0, last = gItem.find(x => x != null); gi < glyphs.length; gi++) gItem[gi] = last = gItem[gi] ?? last;
     let hits = state.ranges.filter(r => r.k1 > p && r.k0 < end);
     if (!hits.length) return null;
     // A reflowed line is replaced as a whole, gaps between its old words included.
@@ -253,7 +258,7 @@ function canvas(page, operatorList) {
       if (!l.line) continue;
       const carried = run.carry?.get(l.of);
       if (carried === null || (carried && carried.from > p)) { l.drop = true; continue; }   // drawn already
-      if (carried) { l.text = carried.text; l.starts = p; }
+      if (carried) { l.text = carried.text; l.starts = p; l.carried = true; }
       if (l.starts < p) { l.drop = true; continue; }
       if (l.k1 > end) {
         const rest = keep(state.keys.slice(l.starts, end), l.text);
@@ -279,23 +284,26 @@ function canvas(page, operatorList) {
     const advOf = g => typeof g === 'number' ? -g * size / 1000
       : (g.width || 0) * wScale + cur.charSpacing + (g.isSpace ? cur.wordSpacing : 0);
     const widthOf = list => list.reduce((w, g) => w + advOf(g), 0);
-    const out = [];
+    const out = [], outItem = [];
+    const put = (g, item) => { if (g !== null) { out.push(g); outItem.push(item); } };
     let gi = 0;
     for (const r of hits) {
       const a = Math.max(r.k0, p) - p, b = Math.min(r.k1, end) - p;   // key positions within this run
       const g0 = owner[a], g1 = owner[b - 1];
-      while (gi < g0) out.push(glyphs[gi++]);
+      while (gi < g0) { put(glyphs[gi], gItem[gi]); gi++; }
       // the replacement goes where the edit starts; a part of it in another run is dropped there
       if (!r.drop && r.k0 >= p) {
+        if (r.line) r.from = out.length;
         for (const ch of r.text) {
-          if (/\s/.test(ch)) { out.push(space ? space : -spaceWidth); continue; }
-          out.push(glyphFor(ch));
+          if (/\s/.test(ch)) { put(space ? space : -spaceWidth, r.item ?? gItem[g0]); continue; }
+          put(glyphFor(ch), r.item ?? gItem[g0]);
         }
       }
+      if (!r.drop && r.k0 >= p && r.line) r.to = out.length;
       gi = g1 + 1;
     }
-    while (gi < glyphs.length) out.push(glyphs[gi++]);
-    const clean = out.filter(g => g !== null);
+    while (gi < glyphs.length) { put(glyphs[gi], gItem[gi]); gi++; }
+    const clean = out;
     const was = widthOf(glyphs), now = widthOf(clean);
     const isGap = g => (typeof g === 'number' && g < -100) || (typeof g === 'object' && g?.isSpace);
     // Text space per unit of page space, from where this run's items sit on the
@@ -316,12 +324,12 @@ function canvas(page, operatorList) {
     const first = idxHere[0];
     const into = partial && first != null ? (state.items[first].width || 0) * Math.max(0, p - state.itemStart[first]) / Math.max(1, keysOf(first)) : 0;
     const kern = delta => -delta * 1000 / size;    // a kerning number moving on by delta
-    const spread = (list, extra) => {               // widen (or narrow) the word gaps by extra in total
+    const spread = (list, extra, items) => {        // widen (or narrow) the word gaps by extra in total
       const gaps = list.map((g, n) => (isGap(g) ? n : -1)).filter(n => n >= 0);
       if (!gaps.length) return false;
       for (const n of [...gaps].reverse()) {
         if (typeof list[n] === 'number') list[n] += kern(extra / gaps.length);
-        else list.splice(n + 1, 0, kern(extra / gaps.length));
+        else { list.splice(n + 1, 0, kern(extra / gaps.length)); items?.splice(n + 1, 0, items[n]); }
       }
       return true;
     };
@@ -340,8 +348,16 @@ function canvas(page, operatorList) {
         for (const ch of m.text) gl.push(/\s/.test(ch) ? (space || -spaceWidth) : glyphFor(ch));
         const list = gl.filter(g => g !== null);
         const wd = widthOf(list);
-        return { dy: m.dy * perUser, glyphs: list, scale: wd > m.cap * perUser ? (m.cap * perUser) / wd : 1 };
+        return { dy: m.dy * perUser, glyphs: list, scale: wd > m.cap * perUser ? (m.cap * perUser) / wd : 1, wd };
       });
+      // how wide the line and those below came out, for the text layer (placed)
+      const item = state.ranges.find(r => r.of === lineHit.of && r.line)?.item;
+      if (item != null && !lineHit.carried && lineHit.k1 <= end && lineHit.to != null)
+        (state.drawn ||= new Map()).set(item, {
+          line: widthOf(clean.slice(lineHit.from, lineHit.to)) * scale / perUser,
+          more: more.map(m => m.wd * m.scale / perUser),
+        });
+      refitSoon();
     } else if (now > was && now > 0) {
       // A changed word in a line that keeps its words. If this run ends its line,
       // the line may grow up to its column's edge; past that, the gaps narrow (by
@@ -357,10 +373,38 @@ function canvas(page, operatorList) {
         if (w > limit + 0.01) scale = limit / w;
       }
     } else if (now < was) {
-      if (!spread(clean, was - now)) clean.push(kern(was - now));
+      if (!spread(clean, was - now, outItem)) { clean.push(kern(was - now)); outItem.push(outItem[outItem.length - 1]); }
     }
+    if (!line && perUser && !partial) placed(state, glyphs, gItem, clean, outItem, scale, perUser, advOf, hits);
     return { glyphs: clean, scale, more };
   };
+}
+
+// Where a changed item ended up on the canvas: a longer word moves the words
+// after it, narrows the gaps or squeezes the run, a shorter one widens them. The
+// text layer is made after the canvas, and takes its words' places from here,
+// so the highlight lies on the word as drawn: { dx, w } in page space.
+function placed(state, before, beforeItem, after, afterItem, scale, perUser, advOf, hits) {
+  const extent = (list, items, scl) => {
+    const m = new Map();
+    let x = 0;
+    list.forEach((g, n) => {
+      const w = advOf(g) * scl, i = items[n];
+      if (i != null) {
+        const e = m.get(i);
+        if (!e) m.set(i, { a: x, b: x + w }); else e.b = x + w;
+      }
+      x += w;
+    });
+    return m;
+  };
+  const old = extent(before, beforeItem, 1), now = extent(after, afterItem, scale);
+  for (const r of hits) {
+    if (r.of != null || r.item == null) continue;
+    const o = old.get(r.item), e = now.get(r.item);
+    if (o && e) (state.drawn ||= new Map()).set(r.item, { dx: (e.a - o.a) / perUser, w: (e.b - e.a) / perUser });
+  }
+  refitSoon();
 }
 
 // What the text layer gets for an item with edits: { item, marks } (marks: the
@@ -368,15 +412,20 @@ function canvas(page, operatorList) {
 // in its first fragment, as wide as the line; a justified one word by word,
 // each where it is set (one piece would be stretched evenly, letters and gaps
 // alike, while the canvas widens the gaps); then the lines it gained below.
-function edited(it, list) {
+function edited(it, list, drawn) {
   const { str, marks } = applyEdits(it.str, list);
   const ln = list.find(ed => ed.line)?.line;
+  if (!ln && drawn?.w != null) {
+    const t = [...it.transform];
+    t[4] += drawn.dx;
+    return [{ item: { ...it, str, transform: t, width: drawn.w }, marks, fit: true }];
+  }
   const out = [];
   // a line of text as one item, or word by word where pdftext.js placed its words
-  const put = (str, marks, dy, width, xs, eol) => {
+  const put = (str, marks, dy, width, xs, eol, fit) => {
     const at = dx => { const t = [...it.transform]; t[4] += dx; t[5] += dy; return t; };
     const words = xs ? [...str.matchAll(/\S+/g)] : [];
-    if (words.length < 2 || words.length !== xs.length) { out.push({ item: { ...it, str, transform: at(0), width, hasEOL: eol }, marks }); return; }
+    if (words.length < 2 || words.length !== xs.length) { out.push({ item: { ...it, str, transform: at(0), width, hasEOL: eol }, marks, fit }); return; }
     words.forEach((w, k) => {
       const last = k === words.length - 1;
       const s = w.index, e = s + w[0].length + (last ? 0 : 1);
@@ -387,10 +436,12 @@ function edited(it, list) {
       });
     });
   };
-  const width = ln ? (ln.justify ? ln.width : Math.min(ln.cap, it.width * (str.length / Math.max(1, it.str.length)))) : it.width;
-  put(str, marks, 0, width, ln?.xs, it.hasEOL || !!ln?.more);
-  for (const m of ln?.more || [])
-    put(m.text, m.marks || [[0, m.text.length]], m.dy, Math.min(m.cap, it.width * m.text.length / Math.max(1, str.length)), m.xs, true);
+  // a line not justified is as wide as the canvas drew it (placed); before it
+  // is drawn, as its letters make it
+  const width = ln ? (ln.justify ? ln.width : drawn?.line ?? Math.min(ln.cap, it.width * (str.length / Math.max(1, it.str.length)))) : it.width;
+  put(str, marks, 0, width, ln?.xs, it.hasEOL || !!ln?.more, !!ln && !ln.justify && drawn?.line != null);
+  (ln?.more || []).forEach((m, k) =>
+    put(m.text, m.marks || [[0, m.text.length]], m.dy, drawn?.more?.[k] ?? Math.min(m.cap, it.width * m.text.length / Math.max(1, str.length)), m.xs, true, drawn?.more?.[k] != null));
   return out;
 }
 
@@ -410,9 +461,10 @@ function textStream(page, opts) {
       if (state?.edits.length) {
         value.items = value.items.flatMap(it => {
           if (typeof it.str !== 'string') return [it];
-          const list = state.byItem.get(n++);
+          const list = state.byItem.get(n), drawn = state.drawn?.get(n);
+          n++;
           if (!list) return [it];
-          return edited(it, list).map(({ item }) => (opts.disableNormalization ? item : { ...item, str: norm(item.str) }));
+          return edited(it, list, drawn).map(({ item }) => (opts.disableNormalization ? item : { ...item, str: norm(item.str) }));
         });
       }
       controller.enqueue(value);
@@ -436,19 +488,52 @@ function layerTexts(state) {
   state.items.forEach((it, n) => {
     const list = state.byItem.get(n);
     if (!list) out.push({ str: it.str, marks: [] });
-    else for (const { item, marks } of edited(it, list)) out.push({ str: item.str, marks });
+    else for (const { item, marks, fit } of edited(it, list, state.drawn?.get(n))) out.push({ str: item.str, marks, fit: fit && item });
   });
   return out.filter(o => o.str !== '');      // the text layer makes no element for these
 }
 
+// A text layer made before its page was drawn (the find bar's, or Chrome's,
+// which makes it ahead) has the changed words where pdftext.js guessed them; the
+// canvas knows where they are (placed). Each such word is moved and stretched
+// there, measured, so doing it again changes nothing.
+function refit(div, state, want) {
+  const pageW = state.view[2] - state.view[0];
+  const rot = +(div.getAttribute('data-main-rotation') || 0) % 180;
+  const box = div.getBoundingClientRect();
+  const perUnit = (rot ? box.height : box.width) / pageW;
+  if (!perUnit) return;
+  const moves = [];
+  div.querySelectorAll('span[role="presentation"]').forEach((span, n) => {
+    const o = want[n], node = span.firstChild;
+    if (!o?.fit || node?.nodeType !== 3 || node.data !== o.str) return;
+    const t = o.fit.transform;
+    if (t[1] || t[2]) return;                  // rotated text keeps pdf.js's place
+    const r = span.getBoundingClientRect(), len = rot ? r.height : r.width;
+    if (!len) return;
+    const sx = parseFloat(span.style.getPropertyValue('--scale-x')) || 1;
+    moves.push([span, `${(100 * (t[4] - state.view[0]) / pageW).toFixed(2)}%`, sx * o.fit.width * perUnit / len]);
+  });
+  for (const [span, left, sx] of moves) {
+    span.style.left = left;
+    span.style.setProperty('--scale-x', sx);
+  }
+}
+let refitTimer = 0;
+function refitSoon() {
+  clearTimeout(refitTimer);
+  refitTimer = setTimeout(paint, 30);
+}
+
 function paint() {
-  if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
   const ranges = [];
   marked.clear();
-  if (root.hasAttribute('data-hdfx-highlight')) for (const [div, idx] of layers) {
+  for (const [div, idx] of layers) {
     const state = ready.get(idx);
     if (!div.isConnected || !state?.edits.length) continue;
     const want = layerTexts(state), here = [];
+    if (state.drawn) refit(div, state, want);
+    if (!root.hasAttribute('data-hdfx-highlight')) continue;
     div.querySelectorAll('span[role="presentation"]').forEach((span, n) => {
       const node = span.firstChild, o = want[n];
       // a layer from before the model spoke reads otherwise: it is made again
@@ -462,6 +547,7 @@ function paint() {
     });
     if (here.length) marked.set(div, here);
   }
+  if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
   CSS.highlights.set('hdfx-changed', new Highlight(...ranges));
   armHover();
 }

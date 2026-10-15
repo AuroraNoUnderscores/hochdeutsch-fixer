@@ -182,6 +182,20 @@ const cases = [
   ['Im App Store gibt es den Store nicht.', 'Im App Store gibt es den Store nicht.'],      // a shop unless it says blind
   ['Die Koffer sind im Estrich verstaut.', 'Die Koffer sind auf dem Dachboden verstaut.'],
   ['Die Risse im Estrich muss der Estrichleger ausbessern.', 'Die Risse im Estrich muss der Estrichleger ausbessern.'], // screed
+  ['Der Estrich im Wohnzimmer ist frisch und muss noch trocknen.', 'Der Estrich im Wohnzimmer ist frisch und muss noch trocknen.'],
+  ['Auf den Zementestrich kommen 8 cm Estrich.', 'Auf den Zementestrich kommen 8 cm Estrich.'],
+  // the liturgy: the priest's hand-washing and the Mass
+  ['Nach der Gabenbereitung folgt das Lavabo.', 'Nach der Gabenbereitung folgt das Lavabo.'],
+  ['Das Lavabo im Bad ist neu.', 'Das Waschbecken im Bad ist neu.'],
+  ['Die Mass in der Kirche dauerte lange.', 'Die Mass in der Kirche dauerte lange.'],
+  ['Sunday Mass', 'Sunday Mass'],
+  ['Das richtige Mass finden.', 'Das richtige Maß finden.'],
+  ['Das Offertorium folgt.', 'Das Offertorium folgt.'],
+  ['The offertory hymn', 'The offertory hymn'],
+  // English inside German text
+  ['That was a long-ass tunnel.', 'That was a long-ass tunnel.'],
+  ['Ein long-ass Tunnel.', 'Ein long-ass Tunnel.'],
+  ['Er sagte: "I was so happy with the class." Dann ass er.', 'Er sagte: "I was so happy with the class." Dann aß er.'],
   ['Lade die App im Google Play Store herunter.', 'Lade die App im Google Play Store herunter.'],
 
   // agreement without an article, and around adverbs
