@@ -11653,7 +11653,7 @@ class CanvasGraphics {
         scaledY = 0;
       }
       let measure;
-      if (font.remeasure && width > 0) {
+      if (font.remeasure && width > 0 && !glyph.hdfxFont) {
         measure = ctx.measureText(character);
         const measuredWidth = measure.width * 1000 / fontSize * fontSizeScale;
         if (width < measuredWidth && this.isFontSubpixelAAEnabled) {
@@ -11667,11 +11667,12 @@ class CanvasGraphics {
         }
       }
       if (this.contentVisible && (glyph.isInFont || font.missingFile)) {
-        if (simpleFillText && !accent) {
+        if ((simpleFillText || glyph.hdfxFont) && !accent) {
           if (glyph.hdfxFont) {
             const f = ctx.font;
             ctx.font = glyph.hdfxFont(f);
-            ctx.fillText(character, scaledX, scaledY);
+            if (needsFill) ctx.fillText(character, scaledX, scaledY);
+            if (needsStroke) ctx.strokeText(character, scaledX, scaledY);
             ctx.font = f;
           } else
           ctx.fillText(character, scaledX, scaledY);

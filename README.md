@@ -91,6 +91,10 @@ Estrich the attic from Estrich the screed, a Pult as desk from one as mixing
 desk, or Peperoni the bell pepper from Peperoni the chili. For those words topic
 cues decide (`cues` in `dictionary.js`: "Risse", "Beton" → screed; "Keller",
 "Stauraum" → attic), which took them from 44 to 49 of 61 right on .ch sentences.
+A floor being laid ("Zementestrich", "8 cm", "im Wohnzimmer", "frisch") is screed.
+Church words decide two more: "Lavabo" after the Gabenbereitung is the priest's
+hand-washing, not a washbasin, and "Mass" beside Messe, Kirche, Priester or
+"Sunday" is the Mass, never "Maß"; the Offertorium stays one too.
 "Store" is a shop on .ch pages 6 times in 7 (App Store, Music Store), so it only
 becomes a blind when its sentence says so; "Parking" was never the Swiss
 "Parkhaus" in the sample (brands and English), so it is no longer in the dictionary.
@@ -210,7 +214,9 @@ How, since no extension can reach the built-in viewer:
 A changed word is drawn in the document's own font. A letter the document's
 font does not contain (a Swiss document never contains ß) comes from the
 installed font of the same family and weight (Arial Bold for "Arial-BoldMT"),
-otherwise from the generic family pdf.js names for that font.
+otherwise from the generic family pdf.js names for that font, filled and
+outlined as the text around it is (Word draws its fake bold as both), and
+measured in the font's own units.
 
 Words of other lengths would leave lines squeezed or gappy, so a changed
 paragraph is typeset again: its words are broken into its lines anew, each as
@@ -304,8 +310,11 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
   events; Escape or scrolling hides it, a tap shows it on touch screens.
   In a PDF the changed words are tinted too (in the text layer pdf.js lays over
   the drawn page, so it shows on screen, not in print), and pointing at one
-  shows the same card: what the PDF says there and why it changed. The name
-  underline is for web pages only.
+  shows the same card: what the PDF says there and why it changed. The tint
+  lies on the word as drawn: a word changed in a line that keeps its words,
+  or a line set anew, takes the place and width the canvas gave it, also in a
+  text layer made before its page was drawn. The name underline is for web
+  pages only.
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.
@@ -348,7 +357,7 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
 Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`; the
 browser may cache scripts between edits, so reload hard):
 
-- `test.html` — rules only, no model, 160 cases.
+- `test.html` — rules only, no model, 178 cases.
 - `dev/real.html` — for the *installed* extension, nothing stubbed: the 44 notes
   of the answer key as a plain page, graded after 20 s (`?wait=`). The Firefox
   build, installed into a fresh Firefox-engine profile, scores 43/44 there, the
@@ -400,8 +409,11 @@ browser may cache scripts between edits, so reload hard):
 - Language: text under `lang="de"` is always processed. Elsewhere — including a
   German email inside an English webmail interface, where `lang` describes the
   interface and not the message — a block is processed when its own text reads
-  as German (common German words, umlauts). Short fragments on pages with no
-  German around them are left alone.
+  as German (common German words, umlauts), and not more like English (the,
+  was, you …: "was" and "man" are words of both). Inside German text, a
+  sentence that reads as English is left alone ("that was a long-ass tunnel"),
+  and so is "-ass" after a hyphen. Short fragments on pages with no German
+  around them are left alone.
 - Pronoun agreement is only fixed when nothing else could be the antecedent: it
   stops at the next noun, a pronoun in the noun's own clause is left alone, and
   in a following sentence only a pronoun that opens that sentence counts, so
