@@ -141,7 +141,8 @@ const cases = [
   ['Das berühmte Sasara-Tram kommt.', 'Die berühmte Sasara-Straßenbahn kommt.'],
   ['Den Töff-Crack kennt jeder.', 'Den Motorrad-Crack kennt jeder.'],        // the last part decides the article
   ['Welche Eigenschaften braucht eine MaturandIn?', 'Welche Eigenschaften braucht eine MaturandIn?'],
-  ['Die Frau trägt einen kleinen Bub auf dem Arm.', 'Die Frau trägt einen kleinen Jungen auf dem Arm.'],
+  ['Die Frau trägt einen kleinen Bub über das Trottoir.', 'Die Frau trägt einen kleinen Jungen über den Bürgersteig.'],
+  ['Die Frau trägt einen kleinen Bub auf dem Arm.', 'Die Frau trägt einen kleinen Bub auf dem Arm.'], // nothing Swiss: German usage
   ['zur eidgenössisch anerkannten gymnasialen Maturität', 'zum eidgenössisch anerkannten gymnasialen Abitur'],
   ['mit einer gut bestandenen Matura', 'mit einem gut bestandenen Abitur'],
   ['Wir stellen die Kisten in den Estrich.', 'Wir stellen die Kisten auf den Dachboden.'],
@@ -176,7 +177,8 @@ const cases = [
   ['Resp. die Anmeldung ist bis anhin nicht aufgeschaltet.', 'Bzw. die Anmeldung ist bisher nicht freigeschaltet.'],
   ['Wir suchen eine Zügelfirma für den Zügeltermin.', 'Wir suchen eine Umzugsfirma für den Umzugstermin.'],
   ['Die Rahmsauce und die Rahmenbedingungen', 'Die Sahnesauce und die Rahmenbedingungen'],
-  ['Von den Peperoni die Kerne entfernen.', 'Von den Paprika die Kerne entfernen.'],        // no dative -n after a vowel
+  ['Von den Peperoni die Kerne entfernen, mit Rahm servieren.', 'Von den Paprika die Kerne entfernen, mit Sahne servieren.'], // no dative -n after a vowel
+  ['Von den Peperoni die Kerne entfernen.', 'Von den Peperoni die Kerne entfernen.'], // nothing Swiss: German usage
   ['Von den scharfen Peperoni die Kerne entfernen.', 'Von den scharfen Peperoni die Kerne entfernen.'], // chili: German too
   ['Die Storen sind kaputt.', 'Die Jalousien sind kaputt.'],
   ['Im App Store gibt es den Store nicht.', 'Im App Store gibt es den Store nicht.'],      // a shop unless it says blind
@@ -187,14 +189,21 @@ const cases = [
   // the liturgy: the priest's hand-washing and the Mass
   ['Nach der Gabenbereitung folgt das Lavabo.', 'Nach der Gabenbereitung folgt das Lavabo.'],
   ['Das Lavabo im Bad ist neu.', 'Das Waschbecken im Bad ist neu.'],
-  ['Die Mass in der Kirche dauerte lange.', 'Die Mass in der Kirche dauerte lange.'],
+  ['We went to Catholic Mass on Sunday.', 'We went to Catholic Mass on Sunday.'],
+  ['Wir gingen am Sonntag in die Catholic Mass.', 'Wir gingen am Sonntag in die Catholic Mass.'],
   ['Sunday Mass', 'Sunday Mass'],
   ['Das richtige Mass finden.', 'Das richtige Maß finden.'],
   ['Das Offertorium folgt.', 'Das Offertorium folgt.'],
   ['The offertory hymn', 'The offertory hymn'],
-  // English inside German text
+  // English, French, Italian: inside German text too
   ['That was a long-ass tunnel.', 'That was a long-ass tunnel.'],
   ['Ein long-ass Tunnel.', 'Ein long-ass Tunnel.'],
+  ['Le vélo est dans le garage.', 'Le vélo est dans le garage.'],
+  ['Il lavabo è rotto.', 'Il lavabo è rotto.'],
+  ['Merci vielmal für das Velo.', 'Danke vielmals für das Fahrrad.'],
+  // a word German also uses, in text with nothing Swiss about it
+  ['Der Estrich im Neubau muss trocknen.', 'Der Estrich im Neubau muss trocknen.'],
+  ['Der Estrich im Neubau muss trocknen, bevor die Plattenleger kommen.', 'Der Estrich im Neubau muss trocknen, bevor die Fliesenleger kommen.'],
   ['Er sagte: "I was so happy with the class." Dann ass er.', 'Er sagte: "I was so happy with the class." Dann aß er.'],
   ['Lade die App im Google Play Store herunter.', 'Lade die App im Google Play Store herunter.'],
 

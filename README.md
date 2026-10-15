@@ -75,6 +75,46 @@ spelling: places, organisations and titles take ß like any word ("Bahnhofstraß
 Gießen" and "Stiftung Preußischer Kulturbesitz". The price: a company named after
 someone ("Weiss AG") becomes "Weiß AG".
 
+### Which language
+
+Swiss pages mix German with English, French and Italian, and a word in a Swiss
+dictionary can be a word of those too: "long-ass" is no "long-aß", "the Mass"
+no "the Maß", an "offertory" no "Angebotsory", "il lavabo" stays Italian.
+`lang.js` reads which language a text is in the way language identifiers do,
+from how often each language uses each of its words (naive Bayes over the most
+frequent words of German, English, French and Italian, `lang_data.js`, built by
+`tools/lang_build.py` from [wordfreq](https://github.com/rspeer/wordfreq),
+data CC BY-SA 4.0). A word on no list is read by its spelling, letter trigram
+by trigram, so "Velostation" reads German and "offertory" English; the
+dictionary's Swiss words count as German words. Words both languages have
+("was", "man", "die", "will", "hat") weigh what they weigh in each.
+
+It decides at three levels. A block is converted when it reads as German. In
+it, a sentence that reads as another language is left alone; a sentence is
+read in the light of its block (a short one goes with its paragraph, up to
+odds of 1000 to 1), and must be clearly foreign (10 to 1), so "Das Hospital"
+stays German. Inside a German sentence, two or more words in a row that read
+as one other language ("long-ass", "Catholic Mass", "Home Office") are left
+alone; a single word is not, so "das Mass" still becomes "das Maß". A compound
+built on a Swiss word changes only where the rest is made of German words
+("Velo|weg|netz"), not "Offert|ory" or "Offert|orium".
+
+Measured on sentences none of it was built from (`tools/lang_eval.js`: the test sets
+of Universal Dependencies treebanks, and the Swiss sentences the rules change),
+against the list of German function words it replaces:
+
+| sentences | wrong before | wrong now |
+| --- | --- | --- |
+| Swiss German (185) | 23.2% | 0.0% |
+| German, 9+ words (15694) | 0.8% | 0.1% |
+| German, 4–8 words (3101) | 39.6% | 1.5% |
+| English, 9+ words (2040) | 1.5% | 0.0% |
+| French, 9+ words (360) | 6.4% | 0.0% |
+
+The English lines of 1 to 8 words it takes for German are names, addresses and
+dates ("Waheed Zaman, 22, London E17"), with nothing in them to convert. It
+costs about 480 KB and 40 ms once in each frame with text in it.
+
 ### Words that are German too
 
 Some Swiss words are also ordinary German with another meaning: "am Rande" is not
@@ -91,13 +131,25 @@ Estrich the attic from Estrich the screed, a Pult as desk from one as mixing
 desk, or Peperoni the bell pepper from Peperoni the chili. For those words topic
 cues decide (`cues` in `dictionary.js`: "Risse", "Beton" → screed; "Keller",
 "Stauraum" → attic), which took them from 44 to 49 of 61 right on .ch sentences.
-A floor being laid ("Zementestrich", "8 cm", "im Wohnzimmer", "frisch") is screed.
-Church words decide two more: "Lavabo" after the Gabenbereitung is the priest's
-hand-washing, not a washbasin, and "Mass" beside Messe, Kirche, Priester or
-"Sunday" is the Mass, never "Maß"; the Offertorium stays one too.
+A floor being laid ("Zementestrich", "8 cm", "im Wohnzimmer") is screed, and
+"Lavabo" after the Gabenbereitung is the priest's hand-washing, not a washbasin.
 "Store" is a shop on .ch pages 6 times in 7 (App Store, Music Store), so it only
 becomes a blind when its sentence says so; "Parking" was never the Swiss
 "Parkhaus" in the sample (brands and English), so it is no longer in the dictionary.
+
+### Only Swiss text means the Swiss thing
+
+A word German also uses means the Swiss thing only where the text is Swiss:
+"Estrich" is an attic in Zürich and a screed floor everywhere else, "Bub" and
+"Peperoni" are ordinary southern German. So a text has to show it is Swiss
+before such a word changes: a Swiss word German does not use ("Velo",
+"parkieren", "Trottoir"), a Swiss ss where German writes ß ("Strasse",
+"gross"), a price in francs, anywhere on the page (or PDF), or in the block
+around the word. "Der Estrich im Neubau muss trocknen." keeps its Estrich;
+"Die alten Velos stehen im Estrich." gets a Dachboden. Which form is used
+counts, not just the word: "Store" is German too, the plural "Storen" only
+Swiss. A topic cue (above) still decides first; then the Swiss evidence; then,
+in Swiss text, the general model as before.
 
 ### Text already in German spelling is German
 
@@ -173,9 +225,10 @@ preposition before a changed article where German contracts it ("in der Offerte"
 | --- | --- | --- |
 | Vocabulary, compounds, numbers, known ß stems | rules | unambiguous |
 | Articles, adjective endings, case and number after a gender change | rules, model picks when the case is ambiguous ("ein Keks" vs "einen Keks") | |
+| Is this block, sentence, run of words German? | `lang.js`: word frequencies of four languages | 23% of Swiss sentences failed the word list it replaces, 0% this (*Which language*) |
 | every ss/ß | eszett model, rules where it is unsure | measured 5× fewer errors than rules on unseen text |
 | Is a changed word part of a name? | eszett model | a name is a fact about the text, not the word |
-| Dictionary words that are also German (Rande, Store, Estrich) | topic cues, else the general model may keep the original; kept outright in text written in German spelling | measured on a crawl which words these are, and that the model cannot tell their senses apart |
+| Dictionary words that are also German (Rande, Store, Estrich) | topic cues; else kept unless the page or block shows something Swiss; in Swiss text the general model may keep the original | measured on a crawl which words these are, and that the model cannot tell their senses apart |
 | Words that are also German with another meaning (Busse, Finken, tönen) | cue words in the surrounding block, else the model | the model only judges how a sentence sounds and cannot know a page is about speeding fines |
 | "zügeln" → "umziehen", incl. moving the particle to the clause end | model | word order |
 | parkiert → parkt / geparkt | rules | the model scores "Er geparkt das Auto" higher, so it is not asked |
@@ -357,7 +410,7 @@ Edit `dictionary.js`, then hit Reload in `about:debugging`.
 Served over HTTP (`py -m http.server 8765 --directory hochdeutsch-fixer`; the
 browser may cache scripts between edits, so reload hard):
 
-- `test.html` — rules only, no model, 178 cases.
+- `test.html` — rules only, no model, 186 cases.
 - `dev/real.html` — for the *installed* extension, nothing stubbed: the 44 notes
   of the answer key as a plain page, graded after 20 s (`?wait=`). The Firefox
   build, installed into a fresh Firefox-engine profile, scores 43/44 there, the
@@ -379,6 +432,8 @@ browser may cache scripts between edits, so reload hard):
 - `dev/e2e.html` — rules + model, 21 cases.
 - `dev/names.html` — names kept, ordinary words still changed, end to end.
 - `dev/page.html` — the real content script on a page, with the extension API stubbed.
+- `dev/languages.html` — the real content script, rules only, on a page mixing
+  German, English, French and Italian with no `lang` to go by.
 - `dev/changes.html` — the changed-words list, the highlights and the card shown on hover, end to end.
 - `dev/popup.html` — the popup with made-up data, to look at it without the extension.
 - `dev/bg.html` — background page: model loading, ranking, caching.
@@ -406,14 +461,13 @@ browser may cache scripts between edits, so reload hard):
   without which a browser injects nothing there. The popup adds up every frame
   in the tab and says how many frames changed something.
 - Only the text you can see is changed; inputs and code blocks are left alone.
-- Language: text under `lang="de"` is always processed. Elsewhere — including a
-  German email inside an English webmail interface, where `lang` describes the
-  interface and not the message — a block is processed when its own text reads
-  as German (common German words, umlauts), and not more like English (the,
-  was, you …: "was" and "man" are words of both). Inside German text, a
-  sentence that reads as English is left alone ("that was a long-ass tunnel"),
-  and so is "-ass" after a hyphen. Short fragments on pages with no German
-  around them are left alone.
+- Language: see *Which language* above. Text under `lang="de"` is always
+  processed (sentences in another language inside it are still left alone);
+  elsewhere — including a German email inside an English webmail interface,
+  where `lang` describes the interface and not the message — a block is
+  processed when its own text reads as German. A single word has too little
+  to go on: one that both languages have stays German inside German text
+  ("das Mass" is Swiss for "das Maß").
 - Pronoun agreement is only fixed when nothing else could be the antecedent: it
   stops at the next noun, a pronoun in the noun's own clause is left alone, and
   in a following sentence only a pronoun that opens that sentence counts, so

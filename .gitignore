@@ -14,6 +14,9 @@ web-ext-artifacts/
 # another copy of the engine to compare against (dev/swiss.html?base=old)
 dev/old/
 
+# the sentences tools/lang_eval.js measures on, fetched there
+tools/.ud/
+
 # training environment and data (scripts in training/ are tracked)
 training/python312/
 training/.venv/

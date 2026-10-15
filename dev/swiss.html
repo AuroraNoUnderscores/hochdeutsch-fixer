@@ -13,9 +13,10 @@
   const q = new URLSearchParams(location.search);
   const n = +(q.get('n') || 200), useLlm = q.get('llm') !== '0', mode = q.get('mode') || 'neutral';
   const base = q.get('base') ? `./${q.get('base')}/` : '../';
-  for (const f of ['dictionary.js', 'morph.js', 'coverage.js', 'german_too.js', 'engine.js', 'dev/rank.js'])
+  // the language check always from here: an older engine ignores it
+  for (const f of ['dictionary.js', 'morph.js', 'coverage.js', 'german_too.js', '../lang_data.js', '../lang.js', 'engine.js', 'dev/rank.js'])
     await new Promise((ok, fail) => document.head.append(Object.assign(document.createElement('script'),
-      { src: f.startsWith('dev/') ? f.slice(4) : base + f, onload: ok, onerror: fail })));
+      { src: f.startsWith('dev/') ? f.slice(4) : f.startsWith('../') ? f : base + f, onload: ok, onerror: fail })));
   const { load } = await import('../llm.js');
   const { rank } = await import('./ranker.js');
   const E = globalThis.HD_ENGINE;

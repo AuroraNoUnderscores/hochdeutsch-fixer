@@ -4,8 +4,10 @@
 // the baby LLM (llm.js, run by background.js) picks among them afterwards.
 // No DOM access, so this runs in tests too.
 (function (root) {
-  if (!root.HD_DICT && typeof require === 'function') { require('./dictionary.js'); require('./morph.js'); }
-  const D = root.HD_DICT, M = root.HD_MORPH;
+  if (!root.HD_DICT && typeof require === 'function') {
+    require('./dictionary.js'); require('./morph.js'); require('./coverage.js'); require('./german_too.js'); require('./lang.js');
+  }
+  const D = root.HD_DICT, M = root.HD_MORPH, L = root.HD_LANG;
 
   const ENDINGS = ['', 'e', 'en', 'er', 'es', 'em'];
   // How much better a candidate must score (in nats) before the model may
@@ -96,26 +98,62 @@
     return strong >= 1 || clear >= 2 || (clear >= 1 && weak >= 1);
   }
 
-  // English inside German text (a quote, a comment, a song title): "that was a
-  // long-ass tunnel" holds no "aß". Words both languages use (was, man, die, war,
-  // an, so, will) count for neither.
-  const EN_WORDS = /(?<!\p{L})(?:the|a|and|of|to|is|are|were|be|been|this|that|these|those|it|its|it's|you|your|he|she|we|they|my|our|their|with|for|on|at|by|from|have|has|had|not|but|or|if|just|like|what|which|who|would|could|should|don't|didn't|can't|i'm|there|about|into|out|very|really|some|any|how|when|than|then|one)(?!\p{L})/giu;
-  const DE_WORDS = /(?<!\p{L})(?:der|das|den|dem|des|und|ist|sind|nicht|mit|für|ein|eine|einen|einem|einer|von|zu|zum|zur|auf|sich|wir|wird|werden|auch|aber|oder|im|beim|vom|bei|dass|haben|hat|habe|hatte|kann|muss|nach|über|nur|noch|wie|schon|sehr|als|wenn|ich|mir|mich|uns|bin|bist|mein|sein|kein|keine|wurde|bitte|viele|heute|jetzt|hier|dort|es|er|sie)(?!\p{L})/giu;
-  function english(text) {
-    const en = (text.match(EN_WORDS) || []).length;
-    if (en < 2) return false;
-    return en > 2 * (text.match(DE_WORDS) || []).length;
+  // ---------- which language ----------
+  // German, English, French or Italian, read from word frequencies (lang.js).
+  // A sentence is read in the light of the block around it (prior): a short
+  // one ("Das Hospital") goes with its paragraph, a clear one ("That was a
+  // long-ass tunnel.") stands on its own. The block's lead is capped at 10^3,
+  // what a sentence of four or five plain English words outweighs.
+  const PRIOR_CAP = 3;
+  // A sentence is another language only when clearly so (10 to 1): one word
+  // that English also has ("Mass", "Store") does not make a sentence English.
+  const FOREIGN = 1;
+  // the dictionary's Swiss words are German words, which the lists may not know
+  function language(text, prior, t = tables('neutral')) {
+    if (!L) return { lang: 'de', margin: Infinity, odds: {} };
+    const r = L.detect(text, prior, w => swissWord(t, w));
+    return r.lang !== 'de' && (r.margin < FOREIGN || !r.words) ? { ...r, lang: 'de' } : r;
   }
+  function priorOf(t, context) {
+    if (!L || !context) return null;
+    const { odds, words } = L.detect(context, null, w => swissWord(t, w));
+    if (words < 3) return null;
+    return Object.fromEntries(Object.entries(odds).map(([l, o]) => [l, Math.max(-PRIOR_CAP, Math.min(PRIOR_CAP, o))]));
+  }
+
+  // Inside a German sentence, a run of two or more words that each read as
+  // another language, together clearly ("long-ass", "Sunday Mass", "Catholic
+  // Mass"), is that language: quoted, a name, a title. A single word is not:
+  // "das Mass" is Swiss for "das Maß", whatever English makes of "mass". Words
+  // of the dictionary are Swiss German, so never foreign ("Merci vielmal").
+  const RUN_MIN = 2;
+  function foreignRuns(t, tokens) {
+    const out = new Set();
+    if (!L) return out;
+    let run = [], lang = null, sum = 0;
+    const flush = () => { if (run.length >= RUN_MIN && sum >= RUN_MIN) for (const i of run) out.add(i); run = []; lang = null; sum = 0; };
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (!tok.w) { if (!/^[\s'’-]+$/.test(tok.s) || /\n/.test(tok.s)) flush(); continue; }
+      const own = swissWord(t, tok.w) ? null : L.detect(tok.w);
+      if (!own || own.lang === 'de' || (lang && own.lang !== lang)) { flush(); if (own && own.lang !== 'de') { run = [i]; lang = own.lang; sum = own.margin; } continue; }
+      run.push(i); lang = own.lang; sum += own.margin;
+    }
+    flush();
+    return out;
+  }
+  const swissWord = (t, w) => !!(findNoun(t, w) || lookup(t, w) !== undefined || t.amb.has(w) ||
+    D.zuegeln.finite[w.toLowerCase()] || compound(t, w) != null);
 
   // Per-sentence verdicts for one text, so one explaining sentence in an
   // ordinary paragraph suppresses only itself, and an English one is left alone.
-  function metaSentences(text) {
+  function metaSentences(t, text, prior) {
     const spans = [];
     const re = /[.!?]+(?:\s|$)/g;
     let start = 0, m;
     const span = (a, b) => {
       const s = text.slice(a, b);
-      return { end: b, meta: isMeta(s, 'sentence') || english(s) };
+      return { end: b, meta: isMeta(s, 'sentence') || language(s, prior, t).lang !== 'de' };
     };
     while ((m = re.exec(text))) {
       spans.push(span(start, re.lastIndex));
@@ -205,7 +243,7 @@
     for (const [name, src] of [['cues', D.cues], ['ssCues', D.ssCues]])
       for (const [keys, cue] of Object.entries(src || {}))
         for (const k of keys.split(','))
-          t[name].set(k, { pro: cue.pro && new RegExp(cue.pro, 'i'), contra: cue.contra && new RegExp(cue.contra, 'i'), hard: !!cue.hard });
+          t[name].set(k, { pro: cue.pro && new RegExp(cue.pro, 'i'), contra: cue.contra && new RegExp(cue.contra, 'i') });
     return (tableCache[mode] = t);
   }
 
@@ -269,10 +307,35 @@
       const n = c.head.length;
       if (w.length - n < 3 || !lower.startsWith(c.head) || isUpper(w[n])) continue;
       if (c.ex && c.ex.test(lower)) continue;
+      // a compound only where the rest is German: "Velo|station", not "Offert|ory"
+      if (!germanPart(lower.slice(n))) continue;
       // "velofreundlich" stays an adjective: "fahrradfreundlich", not "Fahrradfreundlich"
       const repl = isUpper(w[0]) ? c.repl : c.repl[0].toLowerCase() + c.repl.slice(1);
       return matchCase(w.slice(0, n), repl) + w.slice(n);
     }
+  }
+
+  // A part of a compound: German words, joined as German joins them, with a
+  // linking s, n, e or en between ("Velo|station", "Velo|weg|netz", "Offert|en|
+  // anfrage"); not "Offert|ory" or "Offert|orium", which no German words make.
+  const LINK = ['', 's', 'es', 'n', 'en', 'e'];
+  const partCache = new Map();
+  function germanPart(rest) {
+    if (!L) return true;
+    if (partCache.has(rest)) return partCache.get(rest);
+    // ok[i]: rest from i on is made of words
+    const ok = new Array(rest.length + 1).fill(false);
+    ok[rest.length] = true;
+    for (let i = rest.length - 3; i >= 0; i--)
+      for (let j = i + 3; j <= rest.length && !ok[i]; j++) {
+        if (!L.german(rest.slice(i, j))) continue;
+        ok[i] = LINK.some(l => rest.startsWith(l, j) && ok[j + l.length]);
+      }
+    // a linking element right after the Swiss part ("Offert|en|anfrage")
+    const res = ok[0] || LINK.some(l => l && rest.startsWith(l) && ok[l.length]);
+    if (partCache.size > 5000) partCache.clear();
+    partCache.set(rest, res);
+    return res;
   }
 
   function fixSS(w) {
@@ -323,14 +386,15 @@
       }
       return null;
     };
-    const spans = metaSentences(text);
+    const spans = metaSentences(t, text, priorOf(t, context));
+    const foreign = foreignRuns(t, tokens);
     let span = 0;
     // where the token's sentence starts: after the last . ! or ? before it,
     // tracked as the tokens go (searching back from each made a paragraph quadratic)
     let scan = 0, stop = -1;
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
-      if (!tok.w || quoted(tokens, i)) continue;
+      if (!tok.w || quoted(tokens, i) || foreign.has(i)) continue;
       while (span < spans.length - 1 && tok.at >= spans[span].end) span++;
       if (spans[span]?.meta) continue; // this sentence is explaining a word, or English
       const sentence = text.slice(span ? spans[span - 1].end : 0, spans[span]?.end ?? text.length);
@@ -360,11 +424,7 @@
         continue;
       }
       const lower = w.toLowerCase();
-      // "long-ass", "bad-ass": a German verb never hangs off a hyphen.
-      if (D.ssCase?.[lower] && w === lower && tokens[i - 1]?.s === '-' && tokens[i - 2]?.w) continue;
       if (D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { tok.zuegeln = true; continue; }
-      // A hard cue keeps the word outright: "Mass" in a text about the liturgy.
-      if (t.ssCues.get(lower)?.hard && decide(t.ssCues.get(lower), sentence) === 0) continue;
       const compounded = compound(t, w);
       // Text that already spells ß chose every ss itself.
       const rule = german ? compounded : ssRule(t, w, compounded, tok, text, haystack, sentence, decide);
@@ -499,9 +559,12 @@
       // model may keep the original. The model judges only how a sentence
       // sounds, and on hand-labelled .ch sentences its margins did not separate
       // Estrich the attic from Estrich the screed, nor the two kinds of Peperoni.
-      const alsoGerman = tok.cue !== 1 && (GERMAN_TOO.has(e.sLemma) || GERMAN_TOO.has(tok.w));
-      // Text in German spelling (ß) is German, so a word German also uses is meant as German.
-      if ((alsoGerman && opts.german) || tok.cue === 0) { tok.noun = null; continue; }
+      // The form decides, not the lemma: "Store" is German too, the plural
+      // "Storen" only Swiss.
+      const alsoGerman = tok.cue !== 1 && GERMAN_TOO.has(tok.w);
+      // A word German also uses is meant as German unless the text is Swiss:
+      // written in German spelling (ß), or with nothing Swiss in it.
+      if ((alsoGerman && !opts.swiss) || tok.cue === 0) { tok.noun = null; continue; }
       // "das Sasara-Tram", "die Werbe-Trams": the article agrees with the last part.
       let head = i;
       while (tokens[head - 1]?.s === '-' && inPhrase(tokens[head - 2])) head -= 2;
@@ -943,6 +1006,29 @@
     return eszett > 3 * swiss;
   }
 
+  // Is there anything Swiss about this text? A word German also uses means the
+  // Swiss thing only in Swiss text ("Estrich" is an attic in Zürich, a screed
+  // floor everywhere else), and a text says it is Swiss by what else it holds:
+  // a Swiss word German does not use ("Velo", "parkieren"), a Swiss ss where
+  // German writes ß ("Strasse", "gross"), Swiss francs. Words German also uses
+  // are no evidence either way. Counted on the text and the block around it.
+  const CHF = /(?<!\p{L})(?:CHF|SFr|Fr\.)(?!\p{L})|(?<!\p{L})Franken(?!\p{L})/u;
+  let swissSeen = { text: null, n: 0 };
+  function swissEvidence(t, text) {
+    if (swissSeen.text === text && swissSeen.t === t) return swissSeen.n;
+    let n = CHF.test(text) ? 1 : 0;
+    if (t.phraseRe) { t.phraseRe.lastIndex = 0; n += (text.match(t.phraseRe) || []).length; }
+    for (const [w] of text.matchAll(/\p{L}+/gu)) {
+      const lower = w.toLowerCase();
+      const noun = findNoun(t, w);
+      if (noun) { if (!GERMAN_TOO.has(w) && !t.cues.has(lower)) n++; continue; }
+      if (lookup(t, w) !== undefined || verb(t, w, '', '') !== undefined || D.zuegeln.finite[lower] || D.zuegeln.participle[lower]) { n++; continue; }
+      if (/ss/.test(w) && (fixSS(w) !== w || D.ssWords?.[w] || D.ssCase?.[lower])) n++;
+    }
+    swissSeen = { t, text, n };
+    return n;
+  }
+
   function convert(text, opts = {}) {
     const t = tables(opts.mode || 'hamburg');
     // Pages and blocks explaining words keep their examples ("sagt man Velo",
@@ -963,8 +1049,10 @@
     const tokens = [];
     for (const m of text.matchAll(/(\p{L}+)|[^\p{L}]+/gu))
       tokens.push(m[1] ? { w: m[1], s: m[1], at: m.index } : { s: m[0], at: m.index });
+    // Swiss text, unless the page or the block says otherwise (German spelling)
+    const swiss = !opts.german && (opts.swiss || swissEvidence(t, (opts.context ? opts.context + ' ' : '') + text) > 0);
     wordPass(t, text, tokens, opts);
-    npPass(tokens, text, opts);
+    npPass(tokens, text, { ...opts, swiss });
     sein2habenPass(tokens);
     esHatPass(tokens);
     woPass(tokens);
@@ -1095,7 +1183,10 @@
     return out;
   }
 
-  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, english, matchCase };
+  // How many signs of Swiss text, for the page as a whole (content.js).
+  const swissSigns = (text, mode = 'neutral') => swissEvidence(tables(mode), text);
+
+  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, swissSigns, language, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);

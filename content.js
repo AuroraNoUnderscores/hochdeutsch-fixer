@@ -8,7 +8,7 @@
   const E = globalThis.HD_ENGINE;
   const originals = new Map(); // text node -> { orig, conv, counted }
   let host = location.hostname;
-  let mode = 'hamburg', llm = true, count = 0, active = false, observer = null, pageMeta = false, pageGerman = false;
+  let mode = 'hamburg', llm = true, count = 0, active = false, observer = null, pageMeta = false, pageGerman = false, pageSwiss = false;
   const queue = [];
   let pumping = false;
   let reported = '', reportTimer = null;
@@ -327,8 +327,6 @@
   // rather than use it: "in der Schweiz sagt man <em>Velo</em>".
   const MENTION = 'em,i,q,cite,dfn,abbr,var';
   const BLOCK = 'p,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dd,dt,section,article,main,div,body';
-  // (\b would not see a word boundary before "über": JavaScript's \b is ASCII-only)
-  const GERMAN = /(?<!\p{L})(?:der|die|das|den|dem|des|und|ist|sind|war|nicht|mit|für|ein|eine|einen|einem|von|zu|zum|zur|auf|sich|wir|wird|werden|auch|aber|oder|im|am|beim|vom|bei|dass|haben|hat|habe|hast|hatte|kann|muss|nach|über|nur|noch|wie|was|schon|sehr|man|als|wenn|ich|mir|mich|dir|uns|euch|bin|bist|mein|meine|dein|sein|seine|kein|keine|wurde|bitte|danke|viele|heute|gestern|jetzt|hier|dort)(?!\p{L})/giu;
   const blocks = new WeakMap();
 
   // A text node as the site wrote it, not as this extension changed it: the
@@ -358,10 +356,8 @@
     let info = blocks.get(el);
     if (!info || Math.abs(info.len - len) > 40) {
       const text = visibleText(el);
-      const hits = (text.match(GERMAN) || []).length;
-      // "was", "man", "die" are English too: an English block is not German
-      const german = (hits >= 2 || (hits >= 1 && /[äöüßÄÖÜ]/.test(text))) && !E.english(text);
-      info = { len, text, german, eszett: E.germanSpelling(text) };
+      // German, or English, French, Italian (engine.js, lang.js)
+      info = { len, text, german: E.language(text).lang === 'de', eszett: E.germanSpelling(text) };
       blocks.set(el, info);
     }
     return info;
@@ -389,7 +385,7 @@
     if (!eligible(node)) return;
     const info = blockInfo(node);
     // Text already in German spelling keeps its ss and its German words.
-    const r = E.convert(node.nodeValue, { mode, meta: pageMeta, context: info.text, german: pageGerman || info.eszett });
+    const r = E.convert(node.nodeValue, { mode, meta: pageMeta, context: info.text, german: pageGerman || info.eszett, swiss: pageSwiss });
     const choices = r.pieces.some(p => typeof p === 'object');
     if (!r.changes && !choices) return;
     const rec = { orig: node.nodeValue, conv: r.changes ? r.text : node.nodeValue, counted: r.changes, pieces: r.pieces };
@@ -438,7 +434,9 @@
   // A whole page about language (a spelling blog, a dictionary entry) is left
   // alone, not just the paragraphs whose own text gives it away. Anything
   // already changed is put back. A page in German spelling (ß) is German, so
-  // its ss and its words that German also uses stay as written.
+  // its ss and its words that German also uses stay as written; a page with
+  // something Swiss in it (a Swiss word, a Swiss ss, francs) is Swiss, so those
+  // words take their Swiss meaning also in a paragraph that shows none itself.
   function checkPage(late) {
     if (pageMeta) return;
     const title = document.querySelector('title');
@@ -452,6 +450,7 @@
       start();
     }
     pageGerman = german;
+    pageSwiss = E.swissSigns(t) > 0;
   }
 
   function start() {

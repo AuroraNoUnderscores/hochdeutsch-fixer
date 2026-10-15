@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Languages on one page</title>
+<body>
+<!-- The real content script, rules only (no model), on a page mixing German,
+     English, French and Italian, none of it marked with lang. What reads as
+     German is converted, the rest left as written. -->
+<p id="de">Ich habe mein Velo auf dem Trottoir parkiert, weil es keinen Veloweg gab.</p>
+<p id="en">That was a long-ass tunnel, man. I was there when the class went to Sunday Mass and the offertory hymn began.</p>
+<p id="en2">Was it worth it? The die is cast, and the man who will pass the test says so.</p>
+<p id="fr">Le vélo est dans le garage, merci pour la glace.</p>
+<p id="it">Il lavabo è rotto e la massa è grande.</p>
+<p id="mix">Wir fuhren mit dem Velo durch den Tunnel. That was a long-ass tunnel. Danach gab es Glace für alle.</p>
+<p id="code">Das war ein long-ass Tunnel, und am Sonntag gingen wir in die Catholic Mass.</p>
+<p id="screed">Der Estrich im Neubau muss noch trocknen, bevor das Parkett verlegt wird.</p>
+<p id="attic">Grüezi! Die alten Velos stehen im Estrich, und die Strasse ist gesperrt.</p>
+<div id="result" style="white-space:pre;font-family:monospace"></div>
+<script>
+  window.browser = {
+    storage: { local: { get: async () => ({ mode: 'neutral', llm: false }), set: async () => {} }, onChanged: { addListener() {} } },
+    runtime: { onMessage: { addListener() {} }, sendMessage: async () => null },
+  };
+</script>
+<script src="../dictionary.js"></script>
+<script src="../morph.js"></script>
+<script src="../coverage.js"></script>
+<script src="../german_too.js"></script>
+<script src="../lang_data.js"></script>
+<script src="../lang.js"></script>
+<script src="../engine.js"></script>
+<script src="../content.js"></script>
+<script>
+  const want = {
+    de: 'Ich habe mein Fahrrad auf dem Bürgersteig geparkt, weil es keinen Radweg gab.',
+    en: 'That was a long-ass tunnel, man. I was there when the class went to Sunday Mass and the offertory hymn began.',
+    en2: 'Was it worth it? The die is cast, and the man who will pass the test says so.',
+    fr: 'Le vélo est dans le garage, merci pour la glace.',
+    it: 'Il lavabo è rotto e la massa è grande.',
+    mix: 'Wir fuhren mit dem Fahrrad durch den Tunnel. That was a long-ass tunnel. Danach gab es Eis für alle.',
+    code: 'Das war ein long-ass Tunnel, und am Sonntag gingen wir in die Catholic Mass.',
+    screed: 'Der Estrich im Neubau muss noch trocknen, bevor das Parkett verlegt wird.',
+    attic: 'Guten Tag! Die alten Fahrräder stehen auf dem Dachboden, und die Straße ist gesperrt.',
+  };
+  setTimeout(() => {
+    const log = s => document.getElementById('result').insertAdjacentText('beforeend', s + '\n');
+    let fail = 0;
+    for (const [id, exp] of Object.entries(want)) {
+      const got = document.getElementById(id).textContent;
+      if (got !== exp) { fail++; log(`FAIL #${id}\n  want: ${exp}\n  got:  ${got}`); }
+    }
+    log(`${Object.keys(want).length - fail}/${Object.keys(want).length} passed`);
+    window.__done = true;
+  }, 1500);
+</script>

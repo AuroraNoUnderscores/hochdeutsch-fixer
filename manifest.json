@@ -37,6 +37,8 @@
         "morph.js",
         "coverage.js",
         "german_too.js",
+        "lang_data.js",
+        "lang.js",
         "engine.js",
         "content.js"
       ],
