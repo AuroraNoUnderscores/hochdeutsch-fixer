@@ -86,5 +86,19 @@ const text = edits => edits.filter(e => e.t).map(e => e.t).join(' ');
     JSON.stringify(edits));
 }
 
+// 5. LaTeX's old encoding: "ü" is "¨" and "u", in two items ("Fl¨" "ussigkeit").
+//    The words read as written, and an edit replaces the accent with its letter.
+{
+  const item = (str, x, w) => ({ str, eol: false, t: [12, 0, 0, 12, x, 700], w, h: 12, f: 'f1', ff: 'serif' });
+  const items = [item('Die Fl¨', 50, 40), item('ussigkeit steht im Dewargef¨', 86, 150), { ...item('ass beim Velo.', 233, 80), eol: true }];
+  const edits = await new Promise(resolve => T.convertPage({ page: 2, items, view: [0, 0, 600, 800] }, ({ edits }) => resolve(edits), () => {}));
+  const after = items.map((it, i) => {
+    let s = it.str;
+    for (const e of edits.filter(e => e.i === i).sort((a, b) => b.s - a.s)) s = s.slice(0, e.s) + e.t + s.slice(e.e);
+    return s;
+  }).join('');
+  check('a word with a LaTeX accent reads as written, and is converted', after === 'Die Flüssigkeit steht im Dewargefäß beim Fahrrad.', after);
+}
+
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exitCode = failures ? 1 : 0;

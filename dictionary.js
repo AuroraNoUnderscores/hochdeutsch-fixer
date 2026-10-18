@@ -489,7 +489,7 @@ globalThis.HD_DICT = {
     // general model may keep the original where it reads clearly better.
     'estrich,estriche,estrichs': {
       pro: 'keller|dachboden|dachstock|dachschräg|estrichabteil|estrichtreppe|estrichleiter|stauraum|abstellraum|verstau|kisten|kartons|flohmarkt|brocki|entrümpel|mansarde|schopf',
-      contra: 'estrichleger|zementestrich|anhydrit|fliessestrich|fließestrich|trockenestrich|fussbodenheizung|fußbodenheizung|trittschall|dämmung|fliesen|parkett|bodenbelag|beton|schleif|giess|gieß|gegossen|risse|trockn|verleg|untergrund|belegreif|restfeuchte|nivellier|mörtel|kleber|baustoff|unterlagsboden|bodenaufbau|zement|calciumsulfat|heizestrich|gussasphalt|aushärt|abbind|begehbar|schicht|\\d\\s*(?:mm|cm)\\b|millimeter|zentimeter|quadratmeter|m²|rohbau|neubau|sanier|bodenleger|plattenleger|fliesenleger|belag|wohnzimmer|küche|badezimmer|erdgeschoss|frisch|floor|screed',
+      contra: 'estrichleger|zementestrich|anhydrit|fliessestrich|fließestrich|trockenestrich|fussbodenheizung|fußbodenheizung|trittschall|dämmung|fliesen|parkett|bodenbelag|beton|schleif|giess|gieß|gegossen|risse|trockn|verleg|untergrund|belegreif|restfeuchte|nivellier|mörtel|kleber|baustoff|unterlagsboden|bodenaufbau|zement|calciumsulfat|heizestrich|gussasphalt|aushärt|abbind|begehbar|schicht|\\d\\s*(?:mm|cm)\\b|millimeter|zentimeter|quadratmeter|m²|rohbau|neubau|sanier|bodenleger|plattenleger|fliesenleger|belag|wohnzimmer|küche|badezimmer|erdgeschoss|frisch|floor|screed|laminat|vinyl|grundier|spachtel|feucht|schimmel|dämm|wölb|eingebracht|einbring|estricharbeit|estrichbau',
     },
     'lavabo,lavabos': { contra: LITURGY },
     kübel: {

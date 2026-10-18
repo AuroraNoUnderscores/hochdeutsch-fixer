@@ -93,9 +93,15 @@ It decides at three levels. A block is converted when it reads as German. In
 it, a sentence that reads as another language is left alone; a sentence is
 read in the light of its block (a short one goes with its paragraph, up to
 odds of 1000 to 1), and must be clearly foreign (10 to 1), so "Das Hospital"
-stays German. Inside a German sentence, two or more words in a row that read
-as one other language ("long-ass", "Catholic Mass", "Home Office") are left
-alone; a single word is not, so "das Mass" still becomes "das Maß". A compound
+stays German. A text of six words or more is read in the light of its own
+words instead: an English paragraph in a German page is English sentence by
+sentence, also where it breaks at "Ed. K. Gross etc.". Inside a German
+sentence, two or more words in a row that read as one other language
+("long-ass", "Catholic Mass", "Home Office") are left alone; a single word is
+not, so "das Mass" still becomes "das Maß". A Swiss word or ss right before
+such a run goes with it ("Mass Effect", "Gross margin", "Store locator"); one
+after it does not ("eine faire Offerte"), nor one joined to it by a hyphen
+("Töff-Crack"). A compound
 built on a Swiss word changes only where the rest is made of German words
 ("Velo|weg|netz"), not "Offert|ory" or "Offert|orium".
 
@@ -131,6 +137,8 @@ Estrich the attic from Estrich the screed, a Pult as desk from one as mixing
 desk, or Peperoni the bell pepper from Peperoni the chili. For those words topic
 cues decide (`cues` in `dictionary.js`: "Risse", "Beton" → screed; "Keller",
 "Stauraum" → attic), which took them from 44 to 49 of 61 right on .ch sentences.
+Where both kinds are there, the one nearer the word decides: "Im Keller wurde
+ein neuer Estrich gegossen" is screed.
 A floor being laid ("Zementestrich", "8 cm", "im Wohnzimmer") is screed, and
 "Lavabo" after the Gabenbereitung is the priest's hand-washing, not a washbasin.
 "Store" is a shop on .ch pages 6 times in 7 (App Store, Music Store), so it only
@@ -144,8 +152,12 @@ A word German also uses means the Swiss thing only where the text is Swiss:
 "Peperoni" are ordinary southern German. So a text has to show it is Swiss
 before such a word changes: a Swiss word German does not use ("Velo",
 "parkieren", "Trottoir"), a Swiss ss where German writes ß ("Strasse",
-"gross"), a price in francs, anywhere on the page (or PDF), or in the block
-around the word. "Der Estrich im Neubau muss trocknen." keeps its Estrich;
+"gross"), a price in francs, on the page (or PDF), or in the block around the
+word. Two different signs make a text Swiss, or one in a short text (40 words
+at most, a block): a German page with "Hauptstrasse" in its footer or prices in
+francs for its Swiss customers is not Swiss for that alone. On German screed
+sentences next to one such sign, 8 of 18 became an attic before, none now.
+"Der Estrich im Neubau muss trocknen." keeps its Estrich;
 "Die alten Velos stehen im Estrich." gets a Dachboden. Which form is used
 counts, not just the word: "Store" is German too, the plural "Storen" only
 Swiss. A topic cue (above) still decides first; then the Swiss evidence; then,
@@ -341,6 +353,17 @@ ahead of the last one, never far down the page, where the same characters
 recur. A reflowed line that pdf.js reports as one piece but the PDF draws in
 several (a list label "(a)" and its text) keeps the pieces that read as before
 and sets the rest of the line in the piece after them.
+
+LaTeX in its old font encoding (no `fontenc`) draws "ü" as a "¨" set over a
+"u", each on its own, and pdf.js reports them so, in two pieces ("Fl¨"
+"ussigkeit"). The accent is read as part of its letter: the word is
+"Flüssigkeit" for the rules, the text layer, copying and finding. A reflowed
+line keeps the pieces that read as before, accents included, and goes on in
+the piece where it changes, also when that is one of the line's later pieces;
+the letters such a font lacks ("ä", "ü") are its own accent over its own
+letter, as LaTeX sets them. Paragraphs there keep their line spacing, and a
+new one starts where a line is indented after one that ended short
+(`dev/pdf/latex.pdf`, from `latex.tex`).
 
 Letters a subset font does not contain come from the installed font closest to
 it; LaTeX's TeX Gyre and URW fonts are matched to their originals (Pagella to
