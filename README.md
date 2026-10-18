@@ -289,9 +289,13 @@ paragraph is typeset again: its words are broken into its lines anew, each as
 wide as before, justified lines stay justified, ragged ones may run to the
 column's edge, and a paragraph that grew takes another line below it when the
 space there is free. Paragraphs mixing fonts (a bold word inside) or with
-centred or indented lines keep their lines: a longer word there may use the free
-space at the end of its line, then narrows the word gaps, and only then is
-squeezed. A line set anew reaches the text layer (selecting, copying, finding,
+centred or indented lines keep their lines: a longer word there takes the free
+space at the end of its line (the words after it move on), then narrows the
+word gaps of its line, its own and those after it, evenly and each by at most
+40%; only what those cannot take squeezes it, never below 85% of its width. A
+shorter word on a full line widens the gaps after it, elsewhere the words after
+it close up. PDFs that place every word on its own (Word does) used to squeeze
+a longer word into its own place, down to an eighth of its width. A line set anew reaches the text layer (selecting, copying, finding,
 the highlights) word by word, each word where the line's setting put it, so
 what is selected is what is shown, gaps of a justified line included.
 
@@ -493,9 +497,10 @@ browser may cache scripts between edits, so reload hard):
 
 ## Known limits
 
-- In a PDF, a word that grows right before a footnote mark is squeezed (the
-  mark stays where it is drawn), and a word in a tiny superscript that pdf.js
-  itself reads apart ("V elo") is not found.
+- In a PDF, a word in a tiny superscript that pdf.js itself reads apart ("V
+  elo") is not found, and where a longer word moves the unchanged words after
+  it on, their invisible text-layer boxes (selecting, the find highlight) stay
+  where the PDF had them, up to a word's width off.
 - Frames: the extension runs in iframes too, including the `srcdoc` and `blob`
   documents that artifacts and embedded readers use — those need an explicit
   opt-in (`match_about_blank`, and `match_origin_as_fallback` on Chromium),

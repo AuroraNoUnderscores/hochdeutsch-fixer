@@ -68,7 +68,25 @@ function buildKeys(items, edits) {
   // where each reflowed line's keys end, past the runs that draw its start
   const lineEnd = new Map();
   for (const r of ranges) if (r.of != null) lineEnd.set(r.of, Math.max(lineEnd.get(r.of) ?? 0, r.k1));
-  return { keys: keys.join(''), ranges, byItem, keyItem: at.map(a => a[0]), itemStart, lineEnd };
+  // The pieces of each line, as pdftext.js has them (lineRoom): a line, or its
+  // part before a wide gap (a margin note, a table's next column), named by its
+  // last item; and how far each may grow at its end.
+  const pieceOf = [];
+  let piece = [];
+  const close = () => { for (const i of piece) pieceOf[i] = piece[piece.length - 1]; piece = []; };
+  items.forEach((it, n) => {
+    if ((it.str || '').trim()) {
+      const prev = items[piece[piece.length - 1]];
+      const size = prev && (Math.hypot(prev.transform[2], prev.transform[3]) || prev.height || 10);
+      if (prev && it.transform[4] - (prev.transform[4] + (prev.width || 0)) > size * 1.5) close();
+      piece.push(n);
+    }
+    if (it.hasEOL) close();
+  });
+  close();
+  const roomOf = new Map();
+  for (const ed of edits) if (ed.lineLast != null) roomOf.set(ed.lineLast, ed.room || 0);
+  return { keys: keys.join(''), ranges, byItem, keyItem: at.map(a => a[0]), keyAt: at.map(a => a[1]), itemStart, lineEnd, pieceOf, roomOf };
 }
 
 // A line's new text begins with what a run draws (its keys): the rest of the
@@ -156,6 +174,8 @@ function redraw({ page: idx, edits, version }) {
 const fontGlyphs = new Map();   // loadedName -> Map(char -> glyph)
 const measureCtx = new OffscreenCanvas(1, 1).getContext('2d');
 const SET_FONT = 37, SHOW_TEXT = 44;
+// how far a run may be squeezed to make room for a longer word, at most
+const MIN_SCALE = 0.85;
 
 function learn(font, glyphs) {
   let map = fontGlyphs.get(font);
@@ -240,6 +260,15 @@ function canvas(page, operatorList) {
     const loaded = font.loadedName;
     scanOperators(run, run.ops);
     const map = learn(loaded, glyphs);
+    // Advances in text space, as showText moves along: glyph widths with the
+    // font size, character and word spacing; numbers are kerning in 1/1000 em.
+    const cur = gfx.current;
+    const size = cur.fontSize, wScale = size * cur.fontMatrix[0];
+    const advOf = g => typeof g === 'number' ? -g * size / 1000
+      : (g.width || 0) * wScale + cur.charSpacing + (g.isSpace ? cur.wordSpacing : 0);
+    const widthOf = list => list.reduce((w, g) => w + advOf(g), 0);
+    const kern = delta => -delta * 1000 / size;    // a kerning number moving on by delta
+    const isGap = g => (typeof g === 'number' && g < -100) || (typeof g === 'object' && g?.isSpace);
     // which keys this run draws
     let k = '';
     const owner = [];
@@ -264,8 +293,90 @@ function canvas(page, operatorList) {
     const gItem = [];
     owner.forEach((gi, kk) => { gItem[gi] ??= state.keyItem[p + kk]; });
     for (let gi = 0, last = gItem.find(x => x != null); gi < glyphs.length; gi++) gItem[gi] = last = gItem[gi] ?? last;
+    // Text space per unit of page space, from where this run's items sit on the
+    // page. A run drawing only part of an item (pdf.js joined "(a)" and the
+    // words after it) gets that part of the item's width, by its letters.
+    const was = widthOf(glyphs);
+    const idxHere = [...new Set(state.keyItem.slice(p, end))];
+    const itemsHere = idxHere.map(i => state.items[i]);
+    const keysOf = i => (state.itemStart[i + 1] ?? state.keys.length) - state.itemStart[i];
+    const partial = idxHere.some(i => state.itemStart[i] < p || state.itemStart[i] + keysOf(i) > end);
+    const x0 = Math.min(...itemsHere.map(it => it.transform[4]));
+    const x1 = Math.max(...itemsHere.map(it => it.transform[4] + (it.width || 0)));
+    const span = !partial ? x1 - x0 : idxHere.reduce((w, i) => {
+      const from = Math.max(p, state.itemStart[i]), to = Math.min(end, state.itemStart[i] + keysOf(i));
+      return w + (state.items[i].width || 0) * (to - from) / Math.max(1, keysOf(i));
+    }, 0);
+    // (part of an item: from its text matrix, not by its share of the letters,
+    // whose widths differ; the size there is the font size times that matrix)
+    const scaleOf = it => Math.hypot(it.transform[0], it.transform[1]);
+    const perUser = partial && itemsHere[0] && scaleOf(itemsHere[0]) ? size / scaleOf(itemsHere[0]) : span > 0 ? was / span : 0;
+    // how far into its line this run starts, in page space (a line continued from the run before)
+    const first = idxHere[0];
+    const into = partial && first != null ? (state.items[first].width || 0) * Math.max(0, p - state.itemStart[first]) / Math.max(1, keysOf(first)) : 0;
+
+    // A changed word that grew or shrank earlier on this run's piece of line
+    // (owed, in page space: dx to move on by, absorb of it to take back in the
+    // word gaps): this run moves on, and takes its share back in its gaps.
+    // narrow: the gaps of a list narrowed by amount in all (each by frac at
+    // most), or widened by a negative amount; what was taken.
+    const narrow = (list, items, amount, frac = 0.4) => {
+      if (!amount) return 0;
+      const gaps = list.map((g, n) => (isGap(g) ? n : -1)).filter(n => n >= 0);
+      const total = gaps.reduce((t, n) => t + advOf(list[n]), 0);
+      if (!(total > 0)) return 0;
+      const take = amount > 0 ? Math.min(amount, total * frac) : amount;
+      for (const n of [...gaps].reverse()) {
+        const d = take * advOf(list[n]) / total;
+        if (typeof list[n] === 'number') list[n] -= kern(d);
+        else { list.splice(n + 1, 0, kern(-d)); items?.splice(n + 1, 0, items[n]); }
+      }
+      return take;
+    };
+    const gapsOf = list => list.filter(isGap).length;
+    // (positions are keys: pdf.js may join words the PDF placed one by one into one item)
+    const pieceAt = k => state.pieceOf[state.keyItem[k]];
+    const pieceEnd = id => state.itemStart[id] + keysOf(id);
+    const space = map.get(' '), spaceAdv = space ? advOf(space) : 0.25 * size;
+    // the word gap before key k, in page space: between two items, as they lie;
+    // inside one, a space; 0 for none
+    const gapAt = k => {
+      const a = state.keyItem[k - 1], b = state.keyItem[k];
+      if (a == null || b == null || !perUser) return 0;
+      if (a !== b) return Math.max(0, state.items[b].transform[4] - (state.items[a].transform[4] + (state.items[a].width || 0)));
+      return /\s/.test(state.items[b].str.slice(state.keyAt[k - 1] + 1, state.keyAt[k])) ? spaceAdv / perUser : 0;
+    };
+    const gapsIn = (a, b) => {          // the word gaps before keys a to b: how many, how wide in all
+      let n = 0, w = 0;
+      for (let k = Math.max(1, a); k < b; k++) { const g = gapAt(k); if (g > 0) { n++; w += g; } }
+      return { n, w };
+    };
+    const carryIn = (list, items, scl = 1) => {   // scl: the run's squeeze, which the move must not take
+      const id = pieceAt(p), owed = run.owed?.get(id);
+      if (!owed || !perUser || !(p >= owed.after)) return false;
+      // what is to be taken back, shared out evenly over the gaps still to come
+      const before = gapAt(p), inner = gapsOf(list), rest = gapsIn(end, pieceEnd(id)).n;
+      const n = (before > 0 ? 1 : 0) + inner + rest;
+      const share = n ? owed.absorb / n : 0;
+      let taken = before > 0 ? (share > 0 ? Math.min(share, before * 0.4) : share) : 0;
+      taken += narrow(list, items, share * inner * perUser) / perUser;
+      list.unshift(kern(owed.dx * perUser / scl));
+      items?.unshift(null);
+      owed.dx -= taken; owed.absorb -= taken; owed.after = end;
+      if (end >= pieceEnd(id)) run.owed.delete(id);
+      return true;
+    };
+    // what a change in this run's width leaves the runs after it on its piece
+    const owe = (id, dx, absorb) => {
+      const left = run.owed?.get(id);
+      const keep = left && left.after === end ? left : null;
+      (run.owed ||= new Map()).set(id, { dx: (keep?.dx ?? 0) + dx, absorb: (keep?.absorb ?? 0) + absorb, after: end });
+    };
     let hits = state.ranges.filter(r => r.k1 > p && r.k0 < end);
-    if (!hits.length) return null;
+    if (!hits.length) {
+      const list = [...glyphs];
+      return carryIn(list, null) ? { glyphs: list, scale: 1, more: null } : null;
+    }
     // A reflowed line is replaced as a whole, gaps between its old words included.
     const lines = new Map();
     for (const r of hits) if (r.of != null) {
@@ -304,14 +415,11 @@ function canvas(page, operatorList) {
       if (!hits.length) return null;
     }
 
-    const space = map.get(' ');
     const spaceWidth = space?.width || 250;
     // A letter from the document's font if it has one, else from the installed
     // font; one with an accent the font has no glyph for, where it has the
     // letter and the accent (LaTeX's old encoding): the accent centred over the
     // letter, as LaTeX sets it. Small letters only, whose accent sits as drawn.
-    const cur = gfx.current;
-    const size = cur.fontSize, wScale = size * cur.fontMatrix[0];
     const glyphsFor = ch => {
       if (map.get(ch)?.isInFont) return [map.get(ch)];
       const [base, mark, ...more] = ch.normalize('NFD');
@@ -324,11 +432,6 @@ function canvas(page, operatorList) {
       };
       return [...move((L - A) / 2), a, ...move(-(L + A) / 2), b];
     };
-    // Advances in text space, as showText moves along: glyph widths with the
-    // font size, character and word spacing; numbers are kerning in 1/1000 em.
-    const advOf = g => typeof g === 'number' ? -g * size / 1000
-      : (g.width || 0) * wScale + cur.charSpacing + (g.isSpace ? cur.wordSpacing : 0);
-    const widthOf = list => list.reduce((w, g) => w + advOf(g), 0);
     const out = [], outItem = [];
     const put = (g, item) => { if (g !== null) { out.push(g); outItem.push(item); } };
     let gi = 0;
@@ -349,26 +452,7 @@ function canvas(page, operatorList) {
     }
     while (gi < glyphs.length) { put(glyphs[gi], gItem[gi]); gi++; }
     const clean = out;
-    const was = widthOf(glyphs), now = widthOf(clean);
-    const isGap = g => (typeof g === 'number' && g < -100) || (typeof g === 'object' && g?.isSpace);
-    // Text space per unit of page space, from where this run's items sit on the
-    // page. A run drawing only part of an item (pdf.js joined "(a)" and the
-    // words after it) gets that part of the item's width, by its letters.
-    const idxHere = [...new Set(state.keyItem.slice(p, end))];
-    const itemsHere = idxHere.map(i => state.items[i]);
-    const keysOf = i => (state.itemStart[i + 1] ?? state.keys.length) - state.itemStart[i];
-    const partial = idxHere.some(i => state.itemStart[i] < p || state.itemStart[i] + keysOf(i) > end);
-    const x0 = Math.min(...itemsHere.map(it => it.transform[4]));
-    const x1 = Math.max(...itemsHere.map(it => it.transform[4] + (it.width || 0)));
-    const span = !partial ? x1 - x0 : idxHere.reduce((w, i) => {
-      const from = Math.max(p, state.itemStart[i]), to = Math.min(end, state.itemStart[i] + keysOf(i));
-      return w + (state.items[i].width || 0) * (to - from) / Math.max(1, keysOf(i));
-    }, 0);
-    const perUser = span > 0 ? was / span : 0;
-    // how far into its line this run starts, in page space (a line continued from the run before)
-    const first = idxHere[0];
-    const into = partial && first != null ? (state.items[first].width || 0) * Math.max(0, p - state.itemStart[first]) / Math.max(1, keysOf(first)) : 0;
-    const kern = delta => -delta * 1000 / size;    // a kerning number moving on by delta
+    const now = widthOf(clean);
     const spread = (list, extra, items) => {        // widen (or narrow) the word gaps by extra in total
       const gaps = list.map((g, n) => (isGap(g) ? n : -1)).filter(n => n >= 0);
       if (!gaps.length) return false;
@@ -404,23 +488,39 @@ function canvas(page, operatorList) {
           more: more.map(m => m.wd * m.scale / perUser),
         });
       refitSoon();
-    } else if (now > was && now > 0) {
-      // A changed word in a line that keeps its words. If this run ends its line,
-      // the line may grow up to its column's edge; past that, the gaps narrow (by
-      // at most 40%), and only then is the run squeezed.
-      const ends = hits.find(r => r.lineLast != null && itemsHere.includes(state.items[r.lineLast]));
-      const limit = was + (ends && perUser ? ends.room * perUser * 0.98 : 0);
-      if (now > limit) {
-        const gaps = clean.map((g, n) => (typeof g === 'number' && g < -100 ? n : -1)).filter(n => n >= 0);
-        const total = gaps.reduce((t, n) => t + advOf(clean[n]), 0);
-        const take = Math.min(now - limit, total * 0.4);
-        if (total > 0) for (const n of gaps) clean[n] -= kern(take * advOf(clean[n]) / total);
-        const w = widthOf(clean);
-        if (w > limit + 0.01) scale = limit / w;
-      }
-    } else if (now < was) {
-      if (!spread(clean, was - now, outItem)) { clean.push(kern(was - now)); outItem.push(outItem[outItem.length - 1]); }
-    }
+    } else if (now !== was && perUser) {
+      // A changed word in a line that keeps its words. A longer one grows into
+      // the free space at its piece's end (the rest of the piece moves on), then
+      // into the word gaps of its run and of the runs after it on the piece,
+      // shared out evenly, each narrowed by at most 40%; only what those cannot
+      // take squeezes its run, and never below MIN_SCALE. A shorter one leaves
+      // the rest of the piece closer, or, on a full line (justified, no room),
+      // its gaps wider.
+      const id = pieceAt(end - 1), endsPiece = end >= pieceEnd(id);
+      const roomAll = (state.roomOf.get(id) ?? 0) * perUser;
+      const room = Math.max(0, (state.roomOf.get(id) ?? 0) * 0.98 - (run.used?.get(id) ?? 0)) * perUser;
+      const full = roomAll < size * 0.5;
+      let extension = now - was, grow = 0;
+      if (now > was) {
+        grow = Math.min(now - was, room);
+        let excess = now - was - grow;
+        const own = clean.filter(isGap).reduce((t, g) => t + advOf(g), 0), later = gapsIn(end, pieceEnd(id)).w * perUser;
+        const capacity = (own + later) * 0.4;
+        if (excess > capacity) {
+          scale = Math.max(MIN_SCALE, (now - (excess - capacity)) / now);
+          excess -= now * (1 - scale);
+        }
+        if (excess > 0 && own + later > 0) narrow(clean, outItem, excess * own / (own + later));
+        extension = widthOf(clean) * scale - was;
+        if (grow > 0) (run.used ||= new Map()).set(id, (run.used.get(id) ?? 0) + grow / perUser);
+      } else if (endsPiece || !full) {
+        if (endsPiece && full && !spread(clean, was - now, outItem)) { clean.push(kern(was - now)); outItem.push(outItem[outItem.length - 1]); }
+        if (endsPiece) extension = 0;
+      } else extension = now - was;
+      carryIn(clean, outItem, scale);
+      if (!endsPiece && extension) owe(id, extension / perUser, (extension > 0 ? extension - grow : full ? extension : 0) / perUser);
+      else if (endsPiece) run.owed?.delete(id);
+    } else if (!line) carryIn(clean, outItem);
     if (!line && perUser && !partial) placed(state, glyphs, gItem, clean, outItem, scale, perUser, advOf, hits);
     return { glyphs: clean, scale, more };
   };
