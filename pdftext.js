@@ -44,7 +44,8 @@ globalThis.HD_PDFTEXT = (() => {
       const g = geo(l);
       if (!g) { if (cur) { paras.push(cur); cur = null; last = null; } continue; }
       const gap = last ? Math.abs(last.y - g.y) : 0;
-      const sameSize = last && g.size / last.size > 0.85 && g.size / last.size < 1.18;
+      // (a size apart is another paragraph: small print, a footnote, a caption)
+      const sameSize = last && g.size / last.size > 0.95 && g.size / last.size < 1.05;
       const indented = last && g.x - last.x > g.size * 0.8 && wide - last.x1 > g.size * 2;
       if (cur && sameSize && gap > 0 && gap < last.size * 1.75 && !indented) { cur.push(l); wide = Math.max(wide, g.x1); }
       else { if (cur) paras.push(cur); cur = [l]; wide = g.x1; }
@@ -60,19 +61,41 @@ globalThis.HD_PDFTEXT = (() => {
   // A hyphen before "und", "oder" … stands for a word's shared ending
   // ("Korrektur- und Verbesserungsvorschläge") and is kept, with its space.
   const SUSPENDED = /^\s*(?:und|oder|bzw|beziehungsweise|sowie|bis|noch|als|wie)(?!\p{L})/u;
+  // Letter-spaced text (small print, footers, headings set wide): pdf.js takes
+  // the gaps between its letters for spaces ("V e l o s t e h t"), and its word
+  // gaps look the same. Its letters are joined, and the words found again by
+  // what reads as German (engine.js, segment).
+  const SPACED = /^\s*\S(?: \S)+\s*$/;
+  const spacedItem = it => SPACED.test(it.str);
   function assemble(items, para) {
     let text = '';
     const from = [];
+    let spaced = false;
     const add = (s, i, o) => { for (let k = 0; k < s.length; k++) { text += s[k]; from.push(i == null ? null : [i, o + k]); } };
+    const addSpaced = (s, i) => {
+      const letters = [], at = [];
+      for (let k = 0; k < s.length; k++) if (s[k] !== ' ') { letters.push(s[k]); at.push(k); }
+      let k = 0;
+      globalThis.HD_ENGINE.segment(letters.join('')).forEach((word, n) => {
+        if (n) add(' ', null);
+        for (const ch of word) { text += ch; from.push([i, at[k++]]); }
+      });
+    };
     para.forEach((line, li) => {
+      const wide = line.some(i => spacedItem(items[i]) && items[i].str.replace(/\s/g, '').length >= 4);
+      if (wide) spaced = true;
       line.forEach((i, j) => {
         const it = items[i];
         if (j > 0) {
           const prev = items[line[j - 1]];
           const gapX = it.t[4] - (prev.t[4] + prev.w);
-          if (!/\s$/.test(prev.str) && !/^\s/.test(it.str) && it.str && gapX > (Math.hypot(it.t[2], it.t[3]) || 10) * 0.15) add(' ', null);
+          // a word apart from the one before, or raised or lowered in a smaller size
+          // (a superscript, a footnote mark): "Velo" + "¹" is no "Velo¹"
+          const size = Math.hypot(it.t[2], it.t[3]) || 10, prevSize = Math.hypot(prev.t[2], prev.t[3]) || 10;
+          const script = Math.min(size, prevSize) < Math.max(size, prevSize) * 0.85 && Math.abs(it.t[5] - prev.t[5]) > Math.min(size, prevSize) * 0.15;
+          if (!/\s$/.test(prev.str) && !/^\s/.test(it.str) && it.str && (gapX > size * 0.15 || script)) add(' ', null);
         }
-        add(it.str, i, 0);
+        if (wide && spacedItem(it)) addSpaced(it.str, i); else add(it.str, i, 0);
       });
       if (li < para.length - 1) {
         const next = para[li + 1].map(i => items[i].str).join('');
@@ -84,7 +107,7 @@ globalThis.HD_PDFTEXT = (() => {
         } else if (!/\s$/.test(text)) add(' ', null);
       }
     });
-    return { ...compose(text, from), para };
+    return { ...compose(text, from), para, items, spaced };
   }
 
   // LaTeX documents in its old font encoding draw "ü" as "¨" with a "u" under
@@ -155,7 +178,7 @@ globalThis.HD_PDFTEXT = (() => {
 
   // Edits in a paragraph's text, as edits of the items it was made from. An
   // edit's info (what it was, why it changed) goes with what it became.
-  function toItems(edits, { text, from }) {
+  function toItems(edits, { text, from, items }) {
     const out = [];
     const local = (s, e) => {
       const src = from.slice(s, e).filter(Boolean).flatMap(([i, o, also]) => (also ? [[i, o], also] : [[i, o]]))
@@ -164,7 +187,8 @@ globalThis.HD_PDFTEXT = (() => {
       const groups = [];
       for (const [i, o] of src) {
         const g = groups[groups.length - 1];
-        if (g && g.i === i && o === g.e) g.e = o + 1; else groups.push({ i, s: o, e: o + 1 });
+        // (letters of one item with spaces between them are one word, letter-spaced)
+        if (g && g.i === i && (o === g.e || !items[i].str.slice(g.e, o).trim())) g.e = o + 1; else groups.push({ i, s: o, e: o + 1 });
       }
       return groups;
     };
@@ -230,7 +254,8 @@ globalThis.HD_PDFTEXT = (() => {
   }
 
   // For a word changed in place: the line it is on, and how far that line
-  // may grow before it reaches its column's edge.
+  // may grow before it reaches its column's edge. A piece of a line followed by
+  // a wide gap (a margin note, a table's next column) may grow into the gap.
   function lineRoom(items, column) {
     const out = new Map();
     let line = [];
@@ -239,7 +264,17 @@ globalThis.HD_PDFTEXT = (() => {
       if (real.length) {
         const a = items[real[0]], z = items[real[real.length - 1]];
         const room = Math.max(0, column(a.t[4]) - (z.t[4] + z.w));
-        for (const i of real) out.set(i, { lineLast: real[real.length - 1], room });
+        let start = 0;
+        real.forEach((i, j) => {
+          const it = items[i], next = items[real[j + 1]];
+          const size = Math.hypot(it.t[2], it.t[3]) || it.h || 10;
+          const gap = next ? next.t[4] - (it.t[4] + it.w) : 0;
+          if (next && gap <= size * 1.5) return;
+          // a piece ends here: before the next one, less a space, or at the column's edge
+          const r = next ? gap - size * 0.5 : room;
+          for (const k of real.slice(start, j + 1)) out.set(k, { lineLast: i, room: Math.max(0, r) });
+          start = j + 1;
+        });
       }
       line = [];
     };
@@ -262,11 +297,17 @@ globalThis.HD_PDFTEXT = (() => {
     };
   }
 
-  function reflow(items, { para, text: was, from: sources }, text, diffs, column, open) {
+  function reflow(items, { para, text: was, from: sources, spaced }, text, diffs, column, open) {
+    if (spaced) return null;                     // letter-spaced: its words keep their places
     const lines = para.map(l => l.filter(i => items[i].str.trim())).filter(l => l.length);
     if (!lines.length) return null;
     const its = lines.flat().map(i => items[i]);
     if (new Set(its.map(it => it.f)).size !== 1) return null;                 // bold or italic words inside
+    const sizeOf = it => Math.hypot(it.t[2], it.t[3]) || it.h || 10;
+    const sizes = its.map(sizeOf);
+    if (Math.max(...sizes) > Math.min(...sizes) * 1.05) return null;          // a footnote mark, small print inside
+    // a line with a column's gap in it is a table's row, not a line of text
+    if (lines.some(l => l.some((i, j) => j && items[i].t[4] - (items[l[j - 1]].t[4] + items[l[j - 1]].w) > sizeOf(items[i]) * 1.5))) return null;
     const geo = lines.map(l => {
       const a = items[l[0]], z = items[l[l.length - 1]];
       return { x0: a.t[4], x1: z.t[4] + z.w, y: a.t[5] };

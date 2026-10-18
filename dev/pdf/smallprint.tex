@@ -1,0 +1,31 @@
+% Small print among normal text: \small to \tiny, a footnote, a table, a caption, a margin note.
+% pdflatex smallprint.tex makes smallprint.pdf.
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{times}
+\begin{document}
+Das Velo steht auf dem Trottoir, und die Offerte liegt im Estrich.\footnote{Das Velo im Spital wurde parkiert; die Glace war gross.}
+
+{\small Kleine Schrift: Das Velo steht vor dem Spital.}
+
+{\footnotesize Fussnotengrösse: Wir parkieren das Velo beim Trottoir.}
+
+{\scriptsize Sehr klein: Die Offerte für das Velo ist gross.}
+
+{\tiny Winzig: Das Trottoir beim Spital ist gross.}
+
+\begin{table}[h]\centering
+\begin{tabular}{ll}
+Velo & Trottoir \\
+Offerte & Spital \\
+{\scriptsize Velostation} & {\tiny Glace} \\
+\end{tabular}
+\caption{Velos und Trottoirs im Kanton}
+\end{table}
+
+\begin{center}{\scriptsize Velo}\quad{\tiny Velo}\quad Velo\textsuperscript{2} und H$_{2}$O beim Spital\end{center}
+
+Normal: Der Entscheid über die Strasse ist gross.\marginpar{\tiny Velo am Rand}
+\end{document}

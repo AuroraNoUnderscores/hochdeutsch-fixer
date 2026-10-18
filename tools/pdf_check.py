@@ -70,6 +70,11 @@ def main():
         for word in ['Die für die', 'Flüssigkeit', 'Dewargefäß', 'verschließbaren', 'Größe der Zelle', 'Fahrrad steht auf dem']:
             check(f'LaTeX: text layer reads "{word}"', word in text)
         check('LaTeX: no accents on their own left', '¨' not in text)
+        # small print: letter-spaced (pdf.js reads "V e l o"), footnotes, tiny text, a table, a margin note
+        for f in ['spaced.pdf', 'smallprint.pdf']:
+            z.nav(base + f); z.wait(READY, 40); time.sleep(4)
+            text = z.js(TEXT).replace(' ', '')
+            check(f'{f}: no Velo, Spital, Offerte left', not any(w in text for w in ['Velo', 'Spital', 'Offerte', 'Trottoir']), text[:200])
 
         # 3. Find: every page searchable, converted, and a match carries over when pdf.js draws its page.
         z.nav(base + 'long.pdf'); z.wait(READY, 40); time.sleep(6)

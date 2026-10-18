@@ -100,5 +100,31 @@ const text = edits => edits.filter(e => e.t).map(e => e.t).join(' ');
   check('a word with a LaTeX accent reads as written, and is converted', after === 'Die Flüssigkeit steht im Dewargefäß beim Fahrrad.', after);
 }
 
+// 6. Small print. Letter-spaced text, which pdf.js reads with a space between
+//    every letter, its word gaps looking the same; a superscript against its
+//    word; lines a size apart are not one paragraph; a table's row is no line.
+{
+  const run = items => new Promise(resolve => T.convertPage({ page: 3 + run.n++, items, view: [0, 0, 600, 800] }, ({ edits }) => resolve(edits), () => {}));
+  run.n = 0;
+  const at = (str, x, y, size, w, eol = false) => ({ str, eol, t: [size, 0, 0, size, x, y], w, h: size, f: 'f1', ff: 'sans-serif' });
+  const apply = (items, edits) => items.map((it, i) => {
+    let s = it.str;
+    for (const e of edits.filter(e => e.i === i).sort((a, b) => b.s - a.s)) s = s.slice(0, e.s) + e.t + s.slice(e.e);
+    return s;
+  });
+  let items = [at('D a s V e l o s t e h t v o r d e m S p i t a l .', 50, 700, 5, 150, true)];
+  check('a letter-spaced line: its words found again', apply(items, await run(items))[0].replace(/ /g, '') === 'DasFahrradstehtvordemKrankenhaus.', apply(items, await run(items))[0]);
+  items = [at('D a s', 50, 700, 5, 12), at(' ', 62, 700, 5, 4), at('V e l o', 66, 700, 5, 14), at(' ', 80, 700, 5, 4), at('i s t', 84, 700, 5, 10), at(' ', 94, 700, 5, 4), at('g r o s s .', 98, 700, 5, 20, true)];
+  const got = apply(items, await run(items)).join('');
+  check('letter-spaced words, each a piece', /Fahrrad/.test(got) && /groß/.test(got), got);
+  items = [at('Das Velo', 50, 700, 11, 45), at('1', 95, 704, 7, 4), at(' steht hier.', 99, 700, 11, 50, true)];
+  check('a word before a superscript is a word', /Fahrrad/.test(apply(items, await run(items))[0]), JSON.stringify(apply(items, await run(items))));
+  items = [at('Das Velo steht vor dem Spital.', 50, 700, 11, 150, true), at('Kleine Schrift: die Offerte ist gross.', 50, 686, 9, 150, true)];
+  const two = await run(items);
+  check('a line a size smaller is its own paragraph', apply(items, two)[1].startsWith('Kleine Schrift: das Angebot'), JSON.stringify(apply(items, two)));
+  items = [at('Velo', 50, 700, 11, 20), at('Trottoir', 150, 700, 11, 40, true), at('Offerte', 50, 686, 11, 35), at('Spital', 150, 686, 11, 30, true)];
+  check('a table keeps its cells', JSON.stringify(apply(items, await run(items))) === JSON.stringify(['Fahrrad', 'Bürgersteig', 'Angebot', 'Krankenhaus']), JSON.stringify(apply(items, await run(items))));
+}
+
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exitCode = failures ? 1 : 0;
