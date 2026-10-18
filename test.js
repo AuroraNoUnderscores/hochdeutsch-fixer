@@ -215,6 +215,10 @@ const cases = [
   ['Lade die App im Google Play Store herunter.', 'Lade die App im Google Play Store herunter.'],
   // a Swiss word or ss before English words is part of them; after one, or in a compound, it is not
   ['Die Gross margin ist hoch.', 'Die Gross margin ist hoch.'],
+  // English words on a German stem keep their ss
+  ['Das war grossly unfair.', 'Das war grossly unfair.'],
+  ['Sie ist fussy und gross.', 'Sie ist fussy und groß.'],
+  ['Die Grossmutter ist grossartig.', 'Die Großmutter ist großartig.'],
   ['Wir spielen Mass Effect.', 'Wir spielen Mass Effect.'],
   ['Der Store locator hilft.', 'Der Store locator hilft.'],
   ['Er macht eine faire Offerte.', 'Er macht ein faires Angebot.'],

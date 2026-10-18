@@ -369,8 +369,14 @@
     return res;
   }
 
+  // An English word built on a German stem ("grossly", "grossed", "fussy"):
+  // an ending German words never have after an ss, or one they rarely have
+  // ("Messing" is brass) on a word that reads foreign.
+  const ENGLISH_END = /(?:ly|ed|ness|ish)$/i, ENGLISH_MAYBE = /(?:y|ing)$/i;
+  const englishForm = w => ENGLISH_END.test(w) || (ENGLISH_MAYBE.test(w) && !!L && L.detect(w).lang !== 'de');
+
   function fixSS(w) {
-    if (!/ss/.test(w) || allCaps(w)) return w;
+    if (!/ss/.test(w) || allCaps(w) || englishForm(w)) return w;
     const lower = w.toLowerCase();
     for (const r of ssRules) {
       if (r.ex && r.ex.test(lower)) continue;
@@ -382,7 +388,7 @@
   // Any other ss after a vowel might be ß ("Floss" -> "Floß"); let the model decide.
   function ssChoice(w) {
     const lower = w.toLowerCase();
-    if (allCaps(w) || ssKeep.has(lower)) return null;
+    if (allCaps(w) || ssKeep.has(lower) || englishForm(w)) return null;
     // a kept word of 5+ letters that starts or ends it: the word's own prefixes
     // and suffixes are looked up (a dozen lookups, not one per kept word)
     for (let n = 5; n < lower.length; n++)
@@ -1233,9 +1239,57 @@
 
   // How many signs of Swiss text, for the page as a whole (content.js).
   const swissSigns = (text, mode = 'neutral') => swissEvidence(tables(mode), text).n;
+
+  // Letters run together into words ("DasVelostehtvordemSpital" from a PDF's
+  // letter-spaced line, whose word gaps look like its letter gaps): the likeliest
+  // German words, by what each costs in German (lang.js, the dictionary's Swiss
+  // words counting as known). A word may start with a capital (a noun), after a
+  // small word ("steht|beim"), or after a noun if it is a common word ("Velo|ist");
+  // not as the end of a compound ("Fahrradstation", "Entscheidungsgrundlagen").
+  const SEG_MAX = 30, SEG_SMALL = 2, SEG_COMMON = 3.5, SEG_LONG = 0.6;
+  function segment(letters, mode = 'neutral') {
+    if (!L || letters.length < 4) return [letters];
+    const t = tables(mode);
+    const price = new Map();
+    const known = w => { const n = findNoun(t, w); return (n && !n.prefix) || lookup(t, w) !== undefined; };
+    const cost = w => {
+      // a piece on no list pays for its length: run-together words read by
+      // their letters are cheap, letter by letter
+      if (!price.has(w)) price.set(w, L.costs(w, known).costs.de + (L.german(w) || known(w) ? 0 : SEG_LONG * w.length));
+      return price.get(w);
+    };
+    const best = [0], from = [0];
+    for (let j = 1; j <= letters.length; j++) {
+      best[j] = Infinity;
+      for (let i = Math.max(0, j - SEG_MAX); i < j; i++) {
+        if (best[i] === Infinity) continue;
+        const piece = letters.slice(i, j);
+        // a piece of a split is a word: listed or the dictionary's, and a short one common
+        if (i > 0 || j < letters.length) {
+          const bare = piece.replace(/[^\p{L}]+$/u, '');
+          if (bare.length < 2 || (!L.german(bare) && !known(bare))) continue;
+          if (bare.length < 4 && cost(bare) > SEG_COMMON) continue;
+        }
+        let gap = 0;
+        if (i > 0 && !isUpper(letters[i])) {
+          // after a noun (a capital that is no common word: not "Wir", "Das")
+          const prev = letters.slice(from[i], i);
+          const prevNoun = isUpper(prev[0]) && cost(prev) > SEG_COMMON;
+          if (prevNoun && cost(piece) > SEG_COMMON) continue;
+          gap = SEG_SMALL;
+        }
+        const c = best[i] + gap + cost(piece);
+        if (c < best[j]) { best[j] = c; from[j] = i; }
+      }
+    }
+    if (best[letters.length] === Infinity) return [letters];
+    const out = [];
+    for (let j = letters.length; j > 0; j = from[j]) out.unshift(letters.slice(from[j], j));
+    return out;
+  }
   const isSwiss = (text, mode = 'neutral') => swissEvidence(tables(mode), text).swiss;
 
-  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, swissSigns, isSwiss, language, matchCase };
+  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, swissSigns, isSwiss, segment, language, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);
