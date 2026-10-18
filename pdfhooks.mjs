@@ -25,6 +25,9 @@ function ask(type, payload) {
 document.addEventListener('hdfx-pdf-redraw', e => redraw(JSON.parse(e.detail)));
 
 const KEEP = /\s/u;
+// combining accents, and the glyphs that draw them on their own
+const SPACING = { '\u0308': ['¨'], '\u0301': ['´', 'ˊ'], '\u0300': ['`', 'ˋ'], '\u0302': ['ˆ', '^'], '\u0303': ['˜', '~'], '\u030a': ['˚'],
+  '\u0327': ['¸'], '\u030c': ['ˇ'], '\u0306': ['˘'], '\u0307': ['˙'], '\u030b': ['˝'], '\u0304': ['¯', 'ˉ'], '\u0328': ['˛'] };
 const norm = s => s.normalize('NFKC');
 
 // Per page: the original text (items as pdf.js extracts them), the edits
@@ -62,24 +65,43 @@ function buildKeys(items, edits) {
     if (k0 >= 0) ranges.push({ k0, k1, text: ed.t, line: ed.line, of: ed.of, item: ed.i, room: ed.room, lineLast: ed.lineLast });
   }
   ranges.sort((a, b) => a.k0 - b.k0);
-  return { keys: keys.join(''), ranges, byItem, keyItem: at.map(a => a[0]), itemStart };
+  // where each reflowed line's keys end, past the runs that draw its start
+  const lineEnd = new Map();
+  for (const r of ranges) if (r.of != null) lineEnd.set(r.of, Math.max(lineEnd.get(r.of) ?? 0, r.k1));
+  return { keys: keys.join(''), ranges, byItem, keyItem: at.map(a => a[0]), itemStart, lineEnd };
 }
 
 // A line's new text begins with what a run draws (its keys): the rest of the
-// text, for the runs after it; or null.
+// text, for the runs after it; or null. An accent drawn on its own (LaTeX draws
+// "ü" as "¨", then "u") is the accent of the letter next to it, before or after.
+const MARK = /\p{M}/u;
 function keep(drawn, text) {
-  let d = 0, t = 0;
-  while (d < drawn.length && t < text.length) {
-    const cp = String.fromCodePoint(text.codePointAt(t));
-    const nn = norm(cp);
-    t += cp.length;
-    for (let u = 0; u < nn.length; u++) {
-      if (KEEP.test(nn[u])) continue;
-      if (nn[u] !== drawn[d++]) return null;
+  // the text letter by letter, each with its accents still to be drawn
+  const cl = [...text].map(cp => {
+    const parts = [...norm(cp).normalize('NFD')].filter(c => !KEEP.test(c));
+    return { raw: cp, bases: parts.filter(c => !MARK.test(c)), marks: parts.filter(c => MARK.test(c)), touched: false };
+  });
+  const done = x => !x.bases.length && !x.marks.length;
+  let c = 0;                                   // the first letter not all drawn
+  const next = () => { while (c < cl.length && done(cl[c])) c++; return cl[c]; };
+  let last = null;                             // the letter drawn last
+  for (const ch of drawn) {
+    const x = next();
+    if (MARK.test(ch)) {
+      // after its letter (a combining accent), or before it (LaTeX's)
+      const own = last && !last.bases.length && last.marks.includes(ch) ? last : x && x.marks.includes(ch) ? x : null;
+      if (!own) return null;
+      own.marks.splice(own.marks.indexOf(ch), 1);
+      own.touched = true;
+      continue;
     }
+    if (!x || x.bases[0] !== ch) return null;
+    x.bases.shift();
+    x.touched = true;
+    last = x;
   }
-  if (d < drawn.length) return null;
-  const rest = text.slice(t).replace(/^\s+/, '');
+  // what is left, as written where none of it was drawn yet
+  const rest = cl.map(x => (!x.touched ? x.raw : (x.bases.join('') + x.marks.join('')).normalize('NFC'))).join('').replace(/^\s+/, '');
   return rest ? rest : null;
 }
 
@@ -255,14 +277,23 @@ function canvas(page, operatorList) {
     // formula): a run that still reads as the line begins is drawn as it is, and
     // the rest of the line goes into the next run.
     for (const l of lines.values()) {
-      if (!l.line) continue;
+      if (!l.line) {
+        // a run of the line's later items, after its start was drawn: what was carried on
+        const head = run.carry?.get(l.of) && state.ranges.find(r => r.of === l.of && r.line);
+        if (!head) continue;
+        Object.assign(l, { line: head.line, text: head.text, starts: head.k0 });
+      }
       const carried = run.carry?.get(l.of);
       if (carried === null || (carried && carried.from > p)) { l.drop = true; continue; }   // drawn already
       if (carried) { l.text = carried.text; l.starts = p; l.carried = true; }
       if (l.starts < p) { l.drop = true; continue; }
-      if (l.k1 > end) {
-        const rest = keep(state.keys.slice(l.starts, end), l.text);
+      if (state.lineEnd.get(l.of) > end) {
+        const drawn = state.keys.slice(l.starts, end);
+        const rest = keep(drawn, l.text);
         if (rest != null) { (run.carry ||= new Map()).set(l.of, { from: end, text: rest }); l.kept = true; continue; }
+        // an accent on its own that the new text has no place for: gone, and
+        // the line goes on in the next run
+        if (/^\p{M}+$/u.test(drawn)) { (run.carry ||= new Map()).set(l.of, { from: end, text: l.text }); l.drop = true; continue; }
       }
       (run.carry ||= new Map()).set(l.of, null);
     }
@@ -275,12 +306,26 @@ function canvas(page, operatorList) {
 
     const space = map.get(' ');
     const spaceWidth = space?.width || 250;
-    // a letter from the document's font if it has one, else from the installed font
-    const glyphFor = ch => (map.get(ch)?.isInFont ? map.get(ch) : fallbackGlyph(ch, font, spaceWidth));
-    // Advances in text space, as showText moves along: glyph widths with the
-    // font size, character and word spacing; numbers are kerning in 1/1000 em.
+    // A letter from the document's font if it has one, else from the installed
+    // font; one with an accent the font has no glyph for, where it has the
+    // letter and the accent (LaTeX's old encoding): the accent centred over the
+    // letter, as LaTeX sets it. Small letters only, whose accent sits as drawn.
     const cur = gfx.current;
     const size = cur.fontSize, wScale = size * cur.fontMatrix[0];
+    const glyphsFor = ch => {
+      if (map.get(ch)?.isInFont) return [map.get(ch)];
+      const [base, mark, ...more] = ch.normalize('NFD');
+      const b = map.get(base), a = mark && !more.length && /[a-hk-z]/.test(base) && SPACING[mark]?.map(c => map.get(c)).find(g => g?.isInFont);
+      if (!b?.isInFont || !a) return [fallbackGlyph(ch, font, spaceWidth)];
+      const L = (b.width || 0) * wScale, A = (a.width || 0) * wScale;
+      const move = d => {                    // kerning numbers moving on by d, none as wide as a word gap
+        const n = -d * 1000 / size, k = Math.ceil(Math.abs(n) / 90) || 1;
+        return Array(k).fill(n / k);
+      };
+      return [...move((L - A) / 2), a, ...move(-(L + A) / 2), b];
+    };
+    // Advances in text space, as showText moves along: glyph widths with the
+    // font size, character and word spacing; numbers are kerning in 1/1000 em.
     const advOf = g => typeof g === 'number' ? -g * size / 1000
       : (g.width || 0) * wScale + cur.charSpacing + (g.isSpace ? cur.wordSpacing : 0);
     const widthOf = list => list.reduce((w, g) => w + advOf(g), 0);
@@ -296,7 +341,7 @@ function canvas(page, operatorList) {
         if (r.line) r.from = out.length;
         for (const ch of r.text) {
           if (/\s/.test(ch)) { put(space ? space : -spaceWidth, r.item ?? gItem[g0]); continue; }
-          put(glyphFor(ch), r.item ?? gItem[g0]);
+          for (const g of glyphsFor(ch)) put(g, r.item ?? gItem[g0]);
         }
       }
       if (!r.drop && r.k0 >= p && r.line) r.to = out.length;
@@ -339,13 +384,14 @@ function canvas(page, operatorList) {
     const line = lineHit?.line;
     if (line && perUser) {
       // a reflowed line: justified to its old width, or as wide as it is, up to the column's edge
-      const before = lineHit.k0 > p ? 0 : into;
+      // (a line carried on from runs drawn as they were starts where this run does)
+      const before = lineHit.k0 > p ? 0 : Math.max(0, (state.items[first]?.transform[4] ?? 0) + into - (state.items[lineHit.of]?.transform[4] ?? 0));
       if (line.justify) spread(clean, (line.width - before) * perUser - now);
       else if (now > (line.cap - before) * perUser) scale = ((line.cap - before) * perUser) / now;
       // and the lines it gained below
       more = (line.more || []).map(m => {
         const gl = [];
-        for (const ch of m.text) gl.push(/\s/.test(ch) ? (space || -spaceWidth) : glyphFor(ch));
+        for (const ch of m.text) gl.push(...(/\s/.test(ch) ? [space || -spaceWidth] : glyphsFor(ch)));
         const list = gl.filter(g => g !== null);
         const wd = widthOf(list);
         return { dy: m.dy * perUser, glyphs: list, scale: wd > m.cap * perUser ? (m.cap * perUser) / wd : 1, wd };
@@ -445,6 +491,39 @@ function edited(it, list, drawn) {
   return out;
 }
 
+// What the text layer gets for each item, edits applied: [{ item, marks, fit }]
+// per item. An accent drawn on its own goes into its letter ("f¨" "ur" read
+// "f" "ür"), so that what is copied and found is the word as written.
+const ACCENT = /[¨´ˆ˜˚¸ˇ˘˙˝¯˛]/;
+const SPACING_OF = Object.fromEntries(Object.entries(SPACING).flatMap(([m, cs]) => cs.filter(c => ACCENT.test(c)).map(c => [c, m])));
+function layerItems(state) {
+  const per = state.items.map((it, n) => {
+    const list = state.byItem.get(n);
+    return list ? edited(it, list, state.drawn?.get(n)) : [{ item: it, marks: [] }];
+  });
+  const flat = per.flat().filter(o => typeof o.item.str === 'string');
+  if (!flat.some(o => ACCENT.test(o.item.str))) return per;
+  const set = (o, str, cut) => {           // a new text, cut: [at, removed] for the marks after it
+    if (cut) o.marks = o.marks.map(([a, b, info]) => [a > cut[0] ? a - cut[1] : a, b > cut[0] ? b - cut[1] : b, info]).filter(([a, b]) => b > a);
+    o.item = { ...o.item, str };
+    if (o.fit) o.fit = o.item;
+  };
+  const join = (accent, letter) => {
+    const c = (letter + SPACING_OF[accent]).normalize('NFC');
+    return /\p{L}/u.test(letter) && c.length === 1 ? c : null;
+  };
+  flat.forEach((o, n) => {
+    let s = o.item.str;
+    for (let k = s.length - 2; k >= 0; k--) {
+      const c = ACCENT.test(s[k]) && join(s[k], s[k + 1]);
+      if (c) { s = s.slice(0, k) + c + s.slice(k + 2); set(o, s, [k, 1]); }
+    }
+    const nx = flat[n + 1], c = nx && ACCENT.test(s.at(-1)) && join(s.at(-1), nx.item.str[0] || '');
+    if (c) { set(o, s.slice(0, -1), [s.length - 1, 1]); set(nx, c + nx.item.str.slice(1)); }
+  });
+  return per;
+}
+
 // The text layer (selection, copy, find) and anything else reading text.
 function textStream(page, opts) {
   const raw = page.streamTextContent({ ...opts, __hdfxRaw: true });
@@ -458,13 +537,13 @@ function textStream(page, opts) {
     async pull(controller) {
       const { value, done } = await reader.read();
       if (done) { controller.close(); return; }
-      if (state?.edits.length) {
+      if (state) {
+        const all = layerItems(state);
         value.items = value.items.flatMap(it => {
           if (typeof it.str !== 'string') return [it];
-          const list = state.byItem.get(n), drawn = state.drawn?.get(n);
-          n++;
-          if (!list) return [it];
-          return edited(it, list, drawn).map(({ item }) => (opts.disableNormalization ? item : { ...item, str: norm(item.str) }));
+          const own = all[n++];
+          if (!own || (!state.byItem.has(n - 1) && own[0].item.str === it.str)) return [it];   // as pdf.js has it
+          return own.map(({ item }) => (opts.disableNormalization ? item : { ...item, str: norm(item.str) }));
         });
       }
       controller.enqueue(value);
@@ -484,13 +563,8 @@ const layers = new Map();     // text layer div -> page index
 
 // The texts of the layer's words, as textStream gave them, with their marks.
 function layerTexts(state) {
-  const out = [];
-  state.items.forEach((it, n) => {
-    const list = state.byItem.get(n);
-    if (!list) out.push({ str: it.str, marks: [] });
-    else for (const { item, marks, fit } of edited(it, list, state.drawn?.get(n))) out.push({ str: item.str, marks, fit: fit && item });
-  });
-  return out.filter(o => o.str !== '');      // the text layer makes no element for these
+  return layerItems(state).flat().map(({ item, marks, fit }) => ({ str: item.str, marks, fit: fit && item }))
+    .filter(o => o.str !== '');      // the text layer makes no element for these
 }
 
 // A text layer made before its page was drawn (the find bar's, or Chrome's,

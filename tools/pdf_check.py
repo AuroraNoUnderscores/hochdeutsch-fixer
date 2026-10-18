@@ -64,6 +64,12 @@ def main():
             check(f'text layer reads "{word}"', word in text)
         check('no Swiss words left in the text layer', not any(w in text for w in ['Neulenker', 'Trottoir', 'Offerte', 'Velo ']))
         check('no errors in the viewer', not [l for l in z.logs() if 'rror' in (l or '')])
+        # LaTeX's old encoding draws "ü" as "¨" over "u": read as written, converted, nothing in the way
+        z.nav(base + 'latex.pdf'); z.wait(READY, 40); time.sleep(4)
+        text = z.js(TEXT)
+        for word in ['Die für die', 'Flüssigkeit', 'Dewargefäß', 'verschließbaren', 'Größe der Zelle', 'Fahrrad steht auf dem']:
+            check(f'LaTeX: text layer reads "{word}"', word in text)
+        check('LaTeX: no accents on their own left', '¨' not in text)
 
         # 3. Find: every page searchable, converted, and a match carries over when pdf.js draws its page.
         z.nav(base + 'long.pdf'); z.wait(READY, 40); time.sleep(6)

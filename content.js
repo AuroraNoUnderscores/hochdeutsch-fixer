@@ -450,7 +450,7 @@
       start();
     }
     pageGerman = german;
-    pageSwiss = E.swissSigns(t) > 0;
+    pageSwiss = E.isSwiss(t);
   }
 
   function start() {

@@ -21,8 +21,9 @@ globalThis.HD_PDFTEXT = (() => {
   }
 
   // Lines of a page from pdf.js's text items, then paragraphs from lines:
-  // a new paragraph where the gap to the next line is larger than usual or the
-  // font size changes (a heading).
+  // a new paragraph where the gap to the next line is larger than usual, the
+  // font size changes (a heading), or a line is indented after one that ended
+  // short (LaTeX's paragraphs, which keep their lines' spacing).
   function paragraphs(items) {
     const lines = [];
     let line = [];
@@ -35,17 +36,18 @@ globalThis.HD_PDFTEXT = (() => {
       const its = idxs.map(i => items[i]).filter(it => it.str.trim());
       if (!its.length) return null;
       const size = Math.max(...its.map(it => Math.hypot(it.t[2], it.t[3]) || it.h || 10));
-      return { y: its[0].t[5], x: its[0].t[4], size };
+      return { y: its[0].t[5], x: its[0].t[4], x1: Math.max(...its.map(it => it.t[4] + it.w)), size };
     };
     const paras = [];
-    let cur = null, last = null;
+    let cur = null, last = null, wide = 0;      // wide: where the paragraph's lines reach
     for (const l of lines) {
       const g = geo(l);
       if (!g) { if (cur) { paras.push(cur); cur = null; last = null; } continue; }
       const gap = last ? Math.abs(last.y - g.y) : 0;
       const sameSize = last && g.size / last.size > 0.85 && g.size / last.size < 1.18;
-      if (cur && sameSize && gap > 0 && gap < last.size * 1.75) cur.push(l);
-      else { if (cur) paras.push(cur); cur = [l]; }
+      const indented = last && g.x - last.x > g.size * 0.8 && wide - last.x1 > g.size * 2;
+      if (cur && sameSize && gap > 0 && gap < last.size * 1.75 && !indented) { cur.push(l); wide = Math.max(wide, g.x1); }
+      else { if (cur) paras.push(cur); cur = [l]; wide = g.x1; }
       last = g;
     }
     if (cur) paras.push(cur);
@@ -82,8 +84,30 @@ globalThis.HD_PDFTEXT = (() => {
         } else if (!/\s$/.test(text)) add(' ', null);
       }
     });
-    return { text, from, para };
+    return { ...compose(text, from), para };
   }
+
+  // LaTeX documents in its old font encoding draw "ü" as "¨" with a "u" under
+  // it, and pdf.js reports both, often in two items ("f¨" "ur"). Read as one
+  // letter, the word reads as written ("für"); the letter keeps both sources
+  // (the third entry of its from), so an edit of it replaces both.
+  const ACCENTS = { '¨': '\u0308', '´': '\u0301', 'ˆ': '\u0302', '˜': '\u0303', '˚': '\u030a', '¸': '\u0327', 'ˇ': '\u030c', '˘': '\u0306', '˙': '\u0307', '˝': '\u030b', '¯': '\u0304', '˛': '\u0328' };
+  function compose(text, from) {
+    if (!/[¨´ˆ˜˚¸ˇ˘˙˝¯˛]/.test(text)) return { text, from };
+    let out = '';
+    const src = [];
+    for (let k = 0; k < text.length; k++) {
+      const mark = ACCENTS[text[k]], next = text[k + 1];
+      const c = mark && next && /\p{L}/u.test(next) ? (next + mark).normalize('NFC') : '';
+      if (c.length === 1) {
+        out += c;
+        src.push(from[k + 1] && from[k] ? [...from[k + 1], from[k]] : from[k + 1] || from[k]);
+        k++;
+      } else { out += text[k]; src.push(from[k]); }
+    }
+    return { text: out, from: src };
+  }
+  const composeText = t => compose(t.replace(/([¨´ˆ˜˚¸ˇ˘˙˝¯˛]) (?=\p{L})/gu, '$1'), []).text;
 
   const TOKEN = /\p{L}+|\p{N}+(?:['’.,]\p{N}+)*|\s+|[^\p{L}\p{N}\s]/gu;
   // Word-level differences, as [start, end) in the original text and the new text.
@@ -133,8 +157,9 @@ globalThis.HD_PDFTEXT = (() => {
   // edit's info (what it was, why it changed) goes with what it became.
   function toItems(edits, { text, from }) {
     const out = [];
-    const local = (s, e, t) => {
-      const src = from.slice(s, e).filter(Boolean);
+    const local = (s, e) => {
+      const src = from.slice(s, e).filter(Boolean).flatMap(([i, o, also]) => (also ? [[i, o], also] : [[i, o]]))
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
       if (!src.length) return;
       const groups = [];
       for (const [i, o] of src) {
@@ -158,12 +183,15 @@ globalThis.HD_PDFTEXT = (() => {
           if (!parts) return;
           const info = ed.info && { ...ed.info, from: w[0], to: newWords[n] };
           if (parts.length === 1) { out.push({ ...parts[0], t: newWords[n], info }); return; }
-          // a word hyphenated over two lines
-          const firstLen = parts[0].e - parts[0].s;
-          const cut = splitAt(w[0], newWords[n], firstLen);
-          out.push({ ...parts[0], t: newWords[n].slice(0, cut), info });
-          out.push({ ...parts[1], t: newWords[n].slice(cut), info });
-          for (const extra of parts.slice(2)) out.push({ ...extra, t: '' });
+          // a word in several items (hyphenated over two lines, or "Fl¨" "ussigkeit"):
+          // each gets its part of the new word, by the letters it had
+          let at = 0, prev = 0;
+          parts.forEach((part, k) => {
+            for (let c = s; c < e; c++) if (from[c]?.[0] === part.i) at++;
+            const cut = k === parts.length - 1 ? newWords[n].length : Math.max(prev, splitAt(w[0], newWords[n], at));
+            out.push({ ...part, t: newWords[n].slice(prev, cut), info });
+            prev = cut;
+          });
         });
       } else {
         out.push({ ...groups[0], t: ed.t, info: ed.info });
@@ -234,7 +262,7 @@ globalThis.HD_PDFTEXT = (() => {
     };
   }
 
-  function reflow(items, { para }, text, diffs, column, open) {
+  function reflow(items, { para, text: was, from: sources }, text, diffs, column, open) {
     const lines = para.map(l => l.filter(i => items[i].str.trim())).filter(l => l.length);
     if (!lines.length) return null;
     const its = lines.flat().map(i => items[i]);
@@ -343,7 +371,11 @@ globalThis.HD_PDFTEXT = (() => {
     const edits = [];
     out.forEach(({ line, text: t, from, to, justify, width: lw, cap }, n) => {
       const l = lines[line];
-      const orig = l.map(i => items[i].str).join(' ').replace(/\s+/g, ' ').trim();
+      // the line as read before (accents composed, as its paragraph was read)
+      const mine = new Set(l);
+      let a = -1, b = -1;
+      sources.forEach((f, k) => { if (f && (mine.has(f[0]) || (f[2] && mine.has(f[2][0])))) { if (a < 0) a = k; b = k + 1; } });
+      const orig = a < 0 ? '' : was.slice(a, b).replace(/\s+/g, ' ').trim();
       const extra = n === out.length - 1 && more.length ? more : null;
       if (orig === t && !extra) return;             // this line reads as before
       const xs = place(from, to, justify ? lw : null, cap);
@@ -358,14 +390,14 @@ globalThis.HD_PDFTEXT = (() => {
   async function convertPage({ page: idx, items, view }, reply, redraw) {
     const E = await engine();
     settings ||= await loadSettings();
-    const pageText = items.map(it => it.str).join(' ');
+    const pageText = composeText(items.map(it => it.str).join(' '));
     pagesText.set(idx, pageText);
     const docText = [...pagesText.values()].join(' ').slice(0, 20000);
     if (E.isMeta(pageText, 'page')) return reply({ edits: [], version: 1, changes: [] });
     const german = E.germanSpelling(docText, 3);
     const german_ = t => E.language(t).lang === 'de';
     const docGerman = german_(docText);
-    const swiss = E.swissSigns(docText) > 0;
+    const swiss = E.isSwiss(docText);
     const jobs = [];
     for (const para of paragraphs(items)) {
       const asm = assemble(items, para);

@@ -27,12 +27,12 @@ const check = (name, got, want) => {
 
 // One page: its text items (as pdf.js reports them), the edits pdftext.js
 // returned, and the runs of glyphs the PDF draws, in order.
-async function page(index, items, edits, runs) {
+async function page(index, items, edits, runs, fontName = 'f1') {
   answer = { edits, version: 1 };
   const pg = { _pageIndex: index, getTextContent: async () => ({ items: items.map(([str, eol, x = 0, width = 100]) => ({ str, hasEOL: !!eol, transform: [12, 0, 0, 12, x, 0], width, height: 12, fontName: 'f1' })), styles: {} }), view: [0, 0, 600, 800] };
   await prepare(pg);
   const hook = canvas(pg, { fnArray: [], argsArray: [] });
-  const gfx = { current: { font: { loadedName: 'f1', name: 'Test' }, fontSize: 12, fontMatrix: [0.001], charSpacing: 0, wordSpacing: 0 } };
+  const gfx = { current: { font: { loadedName: fontName, name: 'Test' }, fontSize: 12, fontMatrix: [0.001], charSpacing: 0, wordSpacing: 0 } };
   const glyph = ch => (ch === ' ' ? -250 : { unicode: ch, fontChar: ch, width: 500, isSpace: false, isInFont: true });
   return runs.map(run => {
     const r = hook(gfx, [...run].map(glyph));
@@ -97,6 +97,26 @@ check('a line in one run', one, ['Mit dem Fahrrad zur Arbeit.']);
     const r = canvas(pg, { fnArray: [], argsArray: [] })(gfx, [...'Mass'].map(ch => ({ unicode: ch, fontChar: ch, width: 0.5 / fm, isSpace: false, isInFont: true })));
     check(`ß from the installed font, fontMatrix ${fm}`, r.glyphs.find(g => g.unicode === 'ß')?.width, want);
   }
+}
+
+// LaTeX draws "ü" as "¨" in a run of its own, then "u" ("Die f" "¨" "ur …"), and
+// pdf.js joins them into items that end in the accent. A reset line is kept run
+// by run as long as it reads as before, its accents included, and set from where
+// it changes, also in the runs of its later items; a "ü" the font lacks is its
+// own "¨" over its own "u".
+{
+  const items = [['Die f¨', false, 72, 30], ['ur das Velo', true, 100, 60]];
+  const runs = ['Die f', '¨', 'ur das Velo'];
+  const drawn = await page(5, items, [
+    { i: 0, s: 0, e: 6, t: 'Die für das Fahrrad', of: 0, line: { justify: false, width: 90, cap: 400 } },
+    { i: 1, s: 0, e: 11, t: '', of: 0 },
+  ], runs);
+  check('runs reading as before stay, the rest is set where it changes', drawn, [null, null, 'ur das Fahrrad']);
+  const answer2 = await page(6, [['Die Gr¨', false, 72, 30], ['osse', true, 100, 20]], [
+    { i: 0, s: 0, e: 7, t: 'Die Größe', of: 0, line: { justify: false, width: 50, cap: 400 } }, { i: 1, s: 0, e: 4, t: '', of: 0 }], ['Die Gr', '¨', 'osse']);
+  check('a letter after a kept accent is its bare letter', answer2, [null, null, 'oße']);
+  const one = await page(7, [['Er f¨ahrt Velo', true, 72, 80]], [{ i: 0, s: 0, e: 14, t: 'Er fährt Fahrrad', of: 0, line: { justify: false, width: 80, cap: 400 } }], ['Er f¨ahrt Velo'], 'latex');
+  check('a letter the font lacks: its accent over its letter', one, ['Er f¨ahrt Fahrrad']);
 }
 
 console.log(failures ? `${failures} failed` : 'all passed');

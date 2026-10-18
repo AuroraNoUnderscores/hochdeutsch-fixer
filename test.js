@@ -5,7 +5,7 @@ const log = typeof document !== 'undefined'
   ? s => document.body.insertAdjacentText('beforeend', s + '\n')
   : console.log;
 
-// [input, expected, mode] - mode defaults to neutral
+// [input, expected, mode, options] - mode defaults to neutral; options as convert takes them (context: the block around)
 const cases = [
   // vocabulary and compounds
   ['Ich fahre mit dem Velo.', 'Ich fahre mit dem Fahrrad.'],
@@ -204,8 +204,25 @@ const cases = [
   // a word German also uses, in text with nothing Swiss about it
   ['Der Estrich im Neubau muss trocknen.', 'Der Estrich im Neubau muss trocknen.'],
   ['Der Estrich im Neubau muss trocknen, bevor die Plattenleger kommen.', 'Der Estrich im Neubau muss trocknen, bevor die Fliesenleger kommen.'],
+  // both kinds of cue: the nearer one decides (in Swiss text, where the cues are asked)
+  ['Im Keller wurde ein neuer Estrich gegossen.', 'Im Keller wurde ein neuer Estrich gegossen.', 'neutral', { swiss: true }],
+  ['Die Kisten aus dem Keller kommen in den Estrich.', 'Die Kisten aus dem Keller kommen auf den Dachboden.', 'neutral', { swiss: true }],
+  ['Auf dem Estrich liegt Laminat.', 'Auf dem Estrich liegt Laminat.', 'neutral', { swiss: true }],
+  // one Swiss sign on a long German page (an address in the footer) is not a Swiss page
+  ['Welcher Estrich ist der richtige für mein Haus?', 'Welcher Estrich ist der richtige für mein Haus?', 'neutral',
+    { context: 'Wir sind Ihr Fachbetrieb aus der Region. Seit über zwanzig Jahren beraten wir private Kunden und Unternehmen in der ganzen Region. Unser Team plant mit Ihnen gemeinsam und kümmert sich um alles von der Beratung bis zur Übergabe. Besuchen Sie uns: Hauptstrasse 12, 80331 München.' }],
   ['Er sagte: "I was so happy with the class." Dann ass er.', 'Er sagte: "I was so happy with the class." Dann aß er.'],
   ['Lade die App im Google Play Store herunter.', 'Lade die App im Google Play Store herunter.'],
+  // a Swiss word or ss before English words is part of them; after one, or in a compound, it is not
+  ['Die Gross margin ist hoch.', 'Die Gross margin ist hoch.'],
+  ['Wir spielen Mass Effect.', 'Wir spielen Mass Effect.'],
+  ['Der Store locator hilft.', 'Der Store locator hilft.'],
+  ['Er macht eine faire Offerte.', 'Er macht ein faires Angebot.'],
+  ['Das Mass Bier ist gross.', 'Das Maß Bier ist groß.'],
+  // an English paragraph in a German page is read as itself, sentence by sentence
+  ['Then of course there are so called historians, like the man you mentioned over the phone, Ed. K. Gross etc.',
+    'Then of course there are so called historians, like the man you mentioned over the phone, Ed. K. Gross etc.', 'neutral',
+    { context: 'Die Gemeinde informiert über die neuen Öffnungszeiten der Verwaltung und die Termine im kommenden Monat.' }],
 
   // agreement without an article, and around adverbs
   ['Antrag und Umschreibung Führerausweises', 'Antrag und Umschreibung Führerscheins'],
@@ -232,8 +249,8 @@ const cases = [
 ];
 
 let fail = 0;
-for (const [input, want, mode = 'neutral'] of cases) {
-  const got = E.convert(input, { mode }).text;
+for (const [input, want, mode = 'neutral', options = {}] of cases) {
+  const got = E.convert(input, { mode, ...options }).text;
   if (got !== want) { fail++; log(`FAIL [${mode}]\n  in:   ${input}\n  want: ${want}\n  got:  ${got}`); }
 }
 log(`${cases.length - fail}/${cases.length} passed`);
