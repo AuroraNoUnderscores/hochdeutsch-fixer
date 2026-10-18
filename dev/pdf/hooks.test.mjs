@@ -119,5 +119,26 @@ check('a line in one run', one, ['Mit dem Fahrrad zur Arbeit.']);
   check('a letter the font lacks: its accent over its letter', one, ['Er f¨ahrt Fahrrad']);
 }
 
+// A line the PDF draws word by word, which pdf.js reports as one item, on a
+// full line (no room at its end): a longer word is not squeezed out of shape
+// (at most to MIN_SCALE, 0.85), the words after it move on, and their gaps
+// take some of it back.
+{
+  answer = { edits: [{ i: 0, s: 8, e: 12, t: 'Fahrrad', lineLast: 0, room: 0 }], version: 1 };
+  const str = 'Mit dem Velo zur Arbeit und dann nach Hause.';
+  const items = [{ str, hasEOL: true, transform: [12, 0, 0, 12, 72, 0], width: 252, height: 12, fontName: 'f1' }];
+  const pg = { _pageIndex: 8, view: [0, 0, 600, 800], getTextContent: async () => ({ items, styles: {} }) };
+  await prepare(pg);
+  const hook = canvas(pg, { fnArray: [], argsArray: [] });
+  const gfx = { current: { font: { loadedName: 'words', name: 'Test' }, fontSize: 12, fontMatrix: [0.001], charSpacing: 0, wordSpacing: 0 } };
+  const glyph = ch => ({ unicode: ch, fontChar: ch, width: 500, isSpace: false, isInFont: true });
+  const out = str.split(' ').map(w => hook(gfx, [...w].map(glyph)));
+  const velo = out[2], after = out.slice(3);
+  check('the longer word keeps its shape', velo && velo.scale >= 0.85, true);
+  check('the words after it move on', after.every(r => r && typeof r.glyphs[0] === 'number' && r.glyphs[0] < 0), true);
+  const moves = after.map(r => -(typeof r?.glyphs[0] === 'number' ? r.glyphs[0] : 0));
+  check('and take some of it back in their gaps, the last the least', moves.every((m, k) => !k || m <= moves[k - 1]) && moves[moves.length - 1] < moves[0], true);
+}
+
 console.log(failures ? `${failures} failed` : 'all passed');
 process.exit(failures ? 1 : 0);
