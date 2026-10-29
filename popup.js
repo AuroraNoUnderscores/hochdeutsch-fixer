@@ -108,21 +108,40 @@ $('show-changes').onclick = e => {
   shownChanges = '';
   refresh();
 };
-// ---------- report a missed word ----------
-// Reports go to issues on the Firefox repo, filed from an issue form
-// (.github/ISSUE_TEMPLATE/missed-word.yml) so each one carries the same labelled
-// fields; tools/reports_export.py reads them back out. Nothing is sent from here:
-// the form opens in a tab prefilled, and the reader reviews it and submits it.
+// ---------- report a mistake ----------
+// Mistakes go to issues on the Firefox repo, filed from an issue form
+// (.github/ISSUE_TEMPLATE/mistake-report.yml) so each one carries the same
+// labelled fields; tools/reports_export.py reads them back out. Nothing is sent
+// from here: the form opens in a tab prefilled, and the reader reviews it and
+// submits it. A change reported as wrong is also put back at that place, here
+// and for good (engine.js, rejection): the place is kept in storage.
 const ISSUES = 'https://github.com/AuroraNoUnderscores/hochdeutsch-fixer/issues/new';
+const KIND = { missed: 'Missed: left unchanged', wrong: 'Wrong: changed, but should stay' };
+let sel = null;
+
+const picked = () => sel?.wrong?.[+$('r-pick').value || 0];
+
+function showKind() {
+  const wrong = $('k-wrong').checked;
+  $('r-pick-row').hidden = !wrong || (sel?.wrong?.length || 0) < 2;
+  $('r-change').hidden = !wrong;
+  $('r-word-row').hidden = wrong;
+  $('r-expected-row').hidden = wrong;
+  $('r-send').textContent = wrong ? 'Put it back, then review on GitHub…' : 'Review on GitHub…';
+  const c = picked();
+  $('r-change').replaceChildren(...(c
+    ? [Object.assign(document.createElement('s'), { textContent: c.to }), ' → ', Object.assign(document.createElement('b'), { textContent: c.from })]
+    : ['Select the changed word on the page first.']));
+}
 
 $('show-report').onclick = async e => {
   const open = $('report').hidden;
   $('report').hidden = !open;
   e.target.setAttribute('aria-pressed', open);
   if (!open) return;
-  // The selection on the page, from whichever frame has it. A popup does not
-  // clear it: selecting the word first, then opening the popup, is the way in.
-  let sel = null;
+  // The selection on the page, from whichever frame has it (web page or PDF). A
+  // popup does not clear it: selecting the word first, then opening the popup, is the way in.
+  sel = null;
   try {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     sel = await browser.tabs.sendMessage(tab.id, 'hd-selection');
@@ -133,23 +152,42 @@ $('show-report').onclick = async e => {
   $('r-page').dataset.lang = sel?.lang || '';
   $('r-page').disabled = !sel?.page;
   $('r-page').checked = !!sel?.page;
-  $('report-hint').textContent = sel ? 'Taken from your selection on the page.'
-    : 'Select the missed word on the page first, or type it here.';
-  $('r-word').focus();
+  const picks = sel?.wrong || [];
+  $('r-pick').replaceChildren(...picks.map((c, i) => Object.assign(document.createElement('option'), {
+    value: i, textContent: `${c.to} ← ${c.from}${c.page ? ` (page ${c.page})` : ''}: …${c.before.slice(-18)}`,
+  })));
+  $('k-wrong').checked = picks.length > 0;
+  $('k-missed').checked = !picks.length;
+  $('report-hint').textContent = !sel ? 'Select the word on the page first, or type it here.'
+    : picks.length ? 'You selected a word the extension changed.' : 'Taken from your selection on the page.';
+  showKind();
 };
+for (const id of ['k-wrong', 'k-missed', 'r-pick']) $(id).onchange = showKind;
 
 $('r-send').onclick = async () => {
-  const word = $('r-word').value.trim();
+  const wrong = $('k-wrong').checked;
+  const c = wrong ? picked() : null;
+  if (wrong && !c) return;
+  const word = wrong ? c.from : $('r-word').value.trim();
   if (!word) return $('r-word').focus();
   const { page, context, lang } = $('r-page').dataset;
-  const s = await browser.storage.local.get(['mode', 'llm']);
+  const s = await browser.storage.local.get(['mode', 'llm', 'rejects']);
+  // Put the change back first, and wait for it: opening the form closes this popup.
+  if (wrong) {
+    const mine = { from: c.from, before: c.before, after: c.after, to: c.to };
+    const same = r => r.from === mine.from && r.before === mine.before && r.after === mine.after;
+    await browser.storage.local.set({ rejects: [...(s.rejects || []).filter(r => !same(r)), mine].slice(-500) });
+  }
   const version = browser.runtime.getManifest?.().version ?? globalThis.chrome?.runtime?.getManifest?.().version ?? '';
   const info = [`Hochdeutsch-Fixer ${version}`.trim(), s.mode || 'hamburg',
-                s.llm === false ? 'rules only' : 'with model', lang && `page language: ${lang}`,
+                s.llm === false ? 'rules only' : 'with model', lang && `page language: ${lang}`, sel?.pdf && 'PDF',
                 navigator.userAgent.match(/(Firefox|Edg|Chrome)\/[\d.]+/)?.[0]].filter(Boolean).join(' · ');
   const q = new URLSearchParams({
-    template: 'missed-word.yml', title: `Missed: ${word.slice(0, 80)}`,
-    word, expected: $('r-expected').value.trim(), context: context || word, note: $('r-note').value.trim(),
+    template: 'mistake-report.yml', title: wrong ? `Wrong: ${c.to} → ${c.from}`.slice(0, 90) : `Missed: ${word.slice(0, 80)}`,
+    kind: KIND[wrong ? 'wrong' : 'missed'], word,
+    changed: wrong ? c.to : '', expected: wrong ? '' : $('r-expected').value.trim(),
+    why: wrong ? c.note || '' : '',
+    context: wrong ? c.before + c.from + c.after : context || word, note: $('r-note').value.trim(),
     page: $('r-page').checked ? page : '', info,
   });
   for (const [k, v] of [...q]) if (!v) q.delete(k);

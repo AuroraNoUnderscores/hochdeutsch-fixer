@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Collect the "Missed word" issues into one JSON file, for patching the dictionary.
+"""Collect the "Mistake report" issues into one JSON file, for patching the dictionary.
 
     python3 tools/reports_export.py [out.json]      (default: dev/reports.json)
 
 Needs the GitHub CLI (`gh`), logged in. Each issue made from the form
-.github/ISSUE_TEMPLATE/missed-word.yml has its fields under "### Label" headings;
-this reads them back into {number, state, created, word, expected, context, page,
-note, info}. Issues closed as handled stay in (state "closed"), so a patch can tell
+.github/ISSUE_TEMPLATE/mistake-report.yml has its fields under "### Label" headings;
+this reads them back into {number, state, created, kind, word, changed, expected, why, context,
+page, note, info}. Issues closed as handled stay in (state "closed"), so a patch can tell
 what was already dealt with.
 """
 import json, re, subprocess, sys
 
-FIELDS = {'Word or phrase': 'word', 'What it should be': 'expected', 'Sentence around it': 'context',
-          'Page': 'page', 'Note': 'note', 'Version and settings': 'info'}
+FIELDS = {'Kind': 'kind', 'Word or phrase': 'word', 'What the extension changed it to': 'changed',
+          'What it should be': 'expected', 'Why it changed (from the hover card)': 'why',
+          'Sentence around it': 'context', 'Page': 'page', 'Note': 'note', 'Version and settings': 'info'}
 
 def parse(body):
     out = dict.fromkeys(FIELDS.values(), '')
@@ -24,7 +25,7 @@ def parse(body):
     return out
 
 def main(path):
-    raw = subprocess.run(['gh', 'issue', 'list', '-R', 'AuroraNoUnderscores/hochdeutsch-fixer', '--label', 'missed-word',
+    raw = subprocess.run(['gh', 'issue', 'list', '-R', 'AuroraNoUnderscores/hochdeutsch-fixer', '--label', 'mistake-report',
                           '--state', 'all', '--limit', '5000', '--json', 'number,state,createdAt,body'],
                          check=True, capture_output=True, text=True).stdout
     reports = [{'number': i['number'], 'state': i['state'].lower(), 'created': i['createdAt'], **parse(i['body'])}

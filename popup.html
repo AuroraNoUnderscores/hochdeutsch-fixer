@@ -34,6 +34,9 @@
   #report input[type=text] { width: 100%; box-sizing: border-box; height: auto; margin-top: 2px; padding: 4px 6px; font: inherit; color: var(--fg);
     background: var(--bg); border: 1px solid var(--line); border-radius: 5px; accent-color: var(--accent); }
   #report label.check { display: flex; justify-content: flex-start; gap: 6px; cursor: pointer; }
+  #report .change { margin: 0 0 6px; font-size: 13px; } #report .change s { color: var(--muted); }
+  #report select { width: 100%; margin-top: 2px; }
+  #report label.check input { flex: none; }
   #report .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
   #report button { width: 100%; margin: 2px 0 6px; }
 </style>
@@ -51,11 +54,15 @@
 <label><span>PDFs too</span> <input type="checkbox" id="pdf"></label>
 <button id="show-changes" aria-pressed="false">Show changed words</button>
 <div id="changes" hidden></div>
-<button id="show-report" aria-pressed="false" title="A Swiss word the extension left alone: select it on the page first">Report a missed word…</button>
+<button id="show-report" aria-pressed="false" title="Select the word on the page first">Report a mistake…</button>
 <div id="report" hidden>
   <p class="hint" id="report-hint"></p>
-  <label>Word or phrase it missed <input type="text" id="r-word" maxlength="200"></label>
-  <label>What it should be (optional) <input type="text" id="r-expected" maxlength="200"></label>
+  <label class="check"><input type="radio" name="kind" value="wrong" id="k-wrong"> It changed something it should not have</label>
+  <label class="check"><input type="radio" name="kind" value="missed" id="k-missed"> It missed something</label>
+  <label id="r-pick-row" hidden>Which change <select id="r-pick"></select></label>
+  <p class="change" id="r-change" hidden></p>
+  <label id="r-word-row">Word or phrase it missed <input type="text" id="r-word" maxlength="200"></label>
+  <label id="r-expected-row">What it should be (optional) <input type="text" id="r-expected" maxlength="200"></label>
   <label>Note (optional) <input type="text" id="r-note" maxlength="300"></label>
   <label class="check"><input type="checkbox" id="r-page" checked> Include the page address (no query)</label>
   <button id="r-send">Review on GitHub…</button>

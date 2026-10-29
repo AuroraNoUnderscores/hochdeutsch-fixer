@@ -413,14 +413,19 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.
-- **Report a missed word**: select a Swiss word or phrase the extension left
-  alone, open the popup and press it. The form (word, what it should be, a note,
-  the page address without query or fragment, the sentence around it as the site
-  wrote it, version and settings) opens prefilled as a "Missed word" issue
-  (`.github/ISSUE_TEMPLATE/missed-word.yml`, label `missed-word`) on this repo;
-  nothing is sent until the reader reviews it and presses Submit, and the page
-  address can be unticked. `python3 tools/reports_export.py` collects all of them
-  into `dev/reports.json` (needs `gh`), which is what a dictionary patch starts from.
+- **Report a mistake** (web pages and PDFs): select the word on the page, open the
+  popup and press it. If the selection is a change the extension made, it offers
+  *It changed something it should not have* (Masse → Maße, say): the change is put
+  back at that one place, for good (the place and the text around it are kept in
+  the browser's storage; a PDF is opened again to draw it), and the report opens.
+  Otherwise it offers *It missed something*. The report is a prefilled issue form
+  (`.github/ISSUE_TEMPLATE/mistake-report.yml`, label `mistake-report`) on this
+  repo: kind, the word as the site wrote it, what it was changed to and why, the
+  sentence around it, version and settings, and the page address without query or
+  fragment (untick it in the popup, or delete it in the form: issues are public).
+  Nothing is sent until the reader presses Submit.
+  `python3 tools/reports_export.py` collects all of them into `dev/reports.json`
+  (needs `gh`), which is what a dictionary patch starts from.
 
 ## Adding words
 

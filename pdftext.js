@@ -16,8 +16,8 @@ globalThis.HD_PDFTEXT = (() => {
   const changes = new Map();
 
   async function loadSettings() {
-    const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'pdf']);
-    return { mode: s.mode || 'hamburg', llm: s.llm !== false };
+    const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'pdf', 'rejects']);
+    return { mode: s.mode || 'hamburg', llm: s.llm !== false, rejects: s.rejects || [] };
   }
 
   // Lines of a page from pdf.js's text items, then paragraphs from lines:
@@ -443,9 +443,10 @@ globalThis.HD_PDFTEXT = (() => {
     for (const para of paragraphs(items)) {
       const asm = assemble(items, para);
       if (!asm.text.trim() || !(docGerman || german_(asm.text))) continue;
-      const r = E.convert(asm.text, { mode: settings.mode, context: pageText, german: german || E.germanSpelling(asm.text), swiss });
+      const r = E.convert(asm.text, { mode: settings.mode, context: pageText, german: german || E.germanSpelling(asm.text), swiss, rejects: settings.rejects });
       jobs.push({ asm, r, text: r.text });
     }
+    pageJobs.set(idx, jobs);
     const column = columns(items);
     const open = openRight(items, view);
     const room = lineRoom(items, column);
@@ -489,6 +490,41 @@ globalThis.HD_PDFTEXT = (() => {
       return { ...d, a, b, info: { from, to: d.t, note } };
     });
   }
+
+  // ---------- a selection, for the popup's "Report a mistake" ----------
+  // The converted paragraphs of each page, so a selection in the text layer can be
+  // tied to what the PDF says there: the change inside it (put back by storing the
+  // place, engine.js rejection; the viewer then opens the PDF again) or, with no
+  // change in it, the sentence around a missed word.
+  const pageJobs = new Map();
+  const squash = t => t.replace(/\s+/g, ' ').trim();
+  function selection() {
+    const sel = getSelection();
+    const word = squash(sel?.toString() || '').slice(0, 200);
+    if (!word || !pageJobs.size) return undefined;
+    const layer = sel.anchorNode?.parentElement?.closest?.('[data-page-number]');
+    const here = layer ? Number(layer.getAttribute('data-page-number')) - 1 : -1;
+    const order = [...pageJobs.keys()].sort((p, q) => (p === here ? -1 : q === here ? 1 : p - q));
+    const wrong = [];
+    let context = '';
+    for (const idx of order) for (const j of pageJobs.get(idx)) {
+      const now = squash(j.text);
+      if (!now.includes(word)) continue;
+      if (!context) { const was = squash(j.asm.text), i = was.indexOf(word); if (i >= 0) context = was.slice(Math.max(0, i - 80), i + word.length + 80); }
+      if (j.text === j.asm.text) continue;
+      for (const d of describe(j)) {
+        const to = squash(d.t);
+        if (!to || !d.info.from.trim() || !(word.includes(to) || to.includes(word))) continue;
+        wrong.push({ ...globalThis.HD_ENGINE.rejection(j.asm.text, d.s, d.e), to: d.t, note: d.info.note, page: idx + 1 });
+      }
+    }
+    let page = '';
+    try { const u = new URL(location.href); page = /^https?:$/.test(u.protocol) ? u.origin + u.pathname : ''; } catch {}
+    return { word, context: context || word, page, lang: document.documentElement.lang || '', wrong: wrong.slice(0, 8), pdf: true };
+  }
+  browser.runtime.onMessage.addListener(msg => {
+    if (msg === 'hd-selection') { const s = selection(); return s && Promise.resolve(s); }
+  });
 
   // What changed on each page, for the popup's count and list.
   const perPage = new Map();

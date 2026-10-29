@@ -9,7 +9,7 @@
       const store = { mode: 'hamburg', llm: true, highlight: false };
       window.browser = {
         tabs: { query: async () => [{ id: 1 }], create: async o => { window.opened = o.url; document.title = o.url; },
-                sendMessage: async (id, m) => m === 'hd-selection' ? { word: 'Velotour', context: 'Wir machen im Mai eine Velotour durch das Wallis.', page: 'https://www.ch.ch/de/', lang: 'de-CH' } : ({ host: 'www.ch.ch', count: 14, active: true, mode: 'hamburg', meta: false }) },
+                sendMessage: async (id, m) => m === 'hd-selection' ? { word: 'Velotour', context: 'Wir machen im Mai eine Velotour durch das Wallis.', page: 'https://www.ch.ch/de/', lang: 'de-CH', wrong: window.__wrong ? [{ from: 'Masse', to: 'Maße', before: 'Die kritische ', after: ' wurde erreicht.', note: 'The model picked Maße over Masse' }] : [] } : ({ host: 'www.ch.ch', count: 14, active: true, mode: 'hamburg', meta: false }) },
         storage: { local: { get: async () => store, set: async o => Object.assign(store, o) } },
         runtime: { sendMessage: async m =>
           m.type === 'llm-status' ? { status: 'ready', decided: 42, log: [{ from: 'Busse', to: 'Buße', margin: 3.1 }] }
