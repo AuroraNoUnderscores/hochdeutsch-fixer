@@ -1,0 +1,40 @@
+name: Missed word
+description: A Swiss word or phrase the extension left unchanged (the popup's "Report a missed word" opens this, prefilled)
+title: "Missed: "
+labels: ["missed-word"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports like this are collected and used to patch the dictionary and rules.
+        This issue is public: delete the page address below if the page is private.
+  - type: input
+    id: word
+    attributes:
+      label: Word or phrase
+      description: Exactly as the page shows it.
+    validations:
+      required: true
+  - type: input
+    id: expected
+    attributes:
+      label: What it should be
+      description: The German Standard German replacement, if you know it.
+  - type: textarea
+    id: context
+    attributes:
+      label: Sentence around it
+      description: As the site wrote it.
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: Address without query or fragment. Optional.
+  - type: input
+    id: note
+    attributes:
+      label: Note
+  - type: input
+    id: info
+    attributes:
+      label: Version and settings

@@ -108,6 +108,54 @@ $('show-changes').onclick = e => {
   shownChanges = '';
   refresh();
 };
+// ---------- report a missed word ----------
+// Reports go to issues on the Firefox repo, filed from an issue form
+// (.github/ISSUE_TEMPLATE/missed-word.yml) so each one carries the same labelled
+// fields; tools/reports_export.py reads them back out. Nothing is sent from here:
+// the form opens in a tab prefilled, and the reader reviews it and submits it.
+const ISSUES = 'https://github.com/AuroraNoUnderscores/hochdeutsch-fixer/issues/new';
+
+$('show-report').onclick = async e => {
+  const open = $('report').hidden;
+  $('report').hidden = !open;
+  e.target.setAttribute('aria-pressed', open);
+  if (!open) return;
+  // The selection on the page, from whichever frame has it. A popup does not
+  // clear it: selecting the word first, then opening the popup, is the way in.
+  let sel = null;
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    sel = await browser.tabs.sendMessage(tab.id, 'hd-selection');
+  } catch {}
+  $('r-word').value = sel?.word || '';
+  $('r-page').dataset.page = sel?.page || '';
+  $('r-page').dataset.context = sel?.context || '';
+  $('r-page').dataset.lang = sel?.lang || '';
+  $('r-page').disabled = !sel?.page;
+  $('r-page').checked = !!sel?.page;
+  $('report-hint').textContent = sel ? 'Taken from your selection on the page.'
+    : 'Select the missed word on the page first, or type it here.';
+  $('r-word').focus();
+};
+
+$('r-send').onclick = async () => {
+  const word = $('r-word').value.trim();
+  if (!word) return $('r-word').focus();
+  const { page, context, lang } = $('r-page').dataset;
+  const s = await browser.storage.local.get(['mode', 'llm']);
+  const version = browser.runtime.getManifest?.().version ?? globalThis.chrome?.runtime?.getManifest?.().version ?? '';
+  const info = [`Hochdeutsch-Fixer ${version}`.trim(), s.mode || 'hamburg',
+                s.llm === false ? 'rules only' : 'with model', lang && `page language: ${lang}`,
+                navigator.userAgent.match(/(Firefox|Edg|Chrome)\/[\d.]+/)?.[0]].filter(Boolean).join(' · ');
+  const q = new URLSearchParams({
+    template: 'missed-word.yml', title: `Missed: ${word.slice(0, 80)}`,
+    word, expected: $('r-expected').value.trim(), context: context || word, note: $('r-note').value.trim(),
+    page: $('r-page').checked ? page : '', info,
+  });
+  for (const [k, v] of [...q]) if (!v) q.delete(k);
+  browser.tabs.create({ url: `${ISSUES}?${q}` });
+};
+
 $('highlight').onchange = e => browser.storage.local.set({ highlight: e.target.checked }).then(later);
 $('pdf').onchange = e => browser.storage.local.set({ pdf: e.target.checked });
 

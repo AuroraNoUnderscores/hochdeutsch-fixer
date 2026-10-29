@@ -29,6 +29,13 @@
   #changes s { color: var(--muted); }
   #changes .n { color: var(--muted); font-variant-numeric: tabular-nums; }
   #changes .empty { color: var(--muted); }
+  #report { border-top: 1px solid var(--line); padding: 8px 14px 4px; }
+  #report label { display: block; padding: 0 0 6px; cursor: default; font-size: 12px; color: var(--muted); }
+  #report input[type=text] { width: 100%; box-sizing: border-box; height: auto; margin-top: 2px; padding: 4px 6px; font: inherit; color: var(--fg);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 5px; accent-color: var(--accent); }
+  #report label.check { display: flex; justify-content: flex-start; gap: 6px; cursor: pointer; }
+  #report .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+  #report button { width: 100%; margin: 2px 0 6px; }
 </style>
 <header><b>Moin!</b> Hochdeutsch-Fixer</header>
 <label>Enabled <input type="checkbox" id="enabled"></label>
@@ -44,6 +51,15 @@
 <label><span>PDFs too</span> <input type="checkbox" id="pdf"></label>
 <button id="show-changes" aria-pressed="false">Show changed words</button>
 <div id="changes" hidden></div>
+<button id="show-report" aria-pressed="false" title="A Swiss word the extension left alone: select it on the page first">Report a missed word…</button>
+<div id="report" hidden>
+  <p class="hint" id="report-hint"></p>
+  <label>Word or phrase it missed <input type="text" id="r-word" maxlength="200"></label>
+  <label>What it should be (optional) <input type="text" id="r-expected" maxlength="200"></label>
+  <label>Note (optional) <input type="text" id="r-note" maxlength="300"></label>
+  <label class="check"><input type="checkbox" id="r-page" checked> Include the page address (no query)</label>
+  <button id="r-send">Review on GitHub…</button>
+</div>
 <div class="foot">
   <div id="count"></div>
   <div id="llm-status"></div>
