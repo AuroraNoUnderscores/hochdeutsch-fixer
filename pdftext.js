@@ -522,7 +522,7 @@ globalThis.HD_PDFTEXT = (() => {
     try { const u = new URL(location.href); page = /^https?:$/.test(u.protocol) ? u.origin + u.pathname : ''; } catch {}
     return { word, context: context || word, page, lang: document.documentElement.lang || '', wrong: wrong.slice(0, 8), pdf: true };
   }
-  browser.runtime.onMessage.addListener(msg => {
+  browser.runtime?.onMessage?.addListener(msg => {
     if (msg === 'hd-selection') { const s = selection(); return s && Promise.resolve(s); }
   });
 
