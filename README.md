@@ -413,6 +413,14 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.
+- **Report a missed word**: select a Swiss word or phrase the extension left
+  alone, open the popup and press it. The form (word, what it should be, a note,
+  the page address without query or fragment, the sentence around it as the site
+  wrote it, version and settings) opens prefilled as a "Missed word" issue
+  (`.github/ISSUE_TEMPLATE/missed-word.yml`, label `missed-word`) on this repo;
+  nothing is sent until the reader reviews it and presses Submit, and the page
+  address can be unticked. `python3 tools/reports_export.py` collects all of them
+  into `dev/reports.json` (needs `gh`), which is what a dictionary patch starts from.
 
 ## Adding words
 

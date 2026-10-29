@@ -500,8 +500,26 @@
     if (active && llm) pump();
   }
 
+  // The text selected in this frame, with the sentence around it as the site
+  // wrote it, for the popup's "Report a missed word". Nothing is returned (and
+  // nothing sent) from a frame with no selection, so the frame that has one answers.
+  function selection() {
+    const sel = getSelection();
+    const word = sel?.toString().replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (!word) return undefined;
+    const block = sel.anchorNode?.parentElement?.closest(BLOCK) || document.body;
+    const text = visibleText(block, 1500).replace(/\s+/g, ' ');
+    const i = text.indexOf(word);
+    const context = i < 0 ? word : text.slice(Math.max(0, i - 80), i + word.length + 80).trim();
+    // The address without query or fragment: those carry tokens and session ids.
+    let page = '';
+    try { const u = new URL(location.href); page = /^https?:$/.test(u.protocol) ? u.origin + u.pathname : ''; } catch {}
+    return { word, context, page, lang: document.documentElement.lang || '' };
+  }
+
   browser.storage.onChanged.addListener(sync);
   browser.runtime.onMessage.addListener(msg => {
+    if (msg === 'hd-selection') { const s = selection(); return s && Promise.resolve(s); }
     if (msg === 'hd-status' && window.top === window)
       return Promise.resolve({ host, count, active, mode, meta: pageMeta, pending: queue.length });
   });
