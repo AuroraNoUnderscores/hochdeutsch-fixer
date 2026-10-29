@@ -222,7 +222,7 @@
     // Switching off, or another flavour: the page is opened again, by the
     // browser's viewer or with the new settings.
     browser.storage.onChanged.addListener(async (ch, area) => {
-      if (area !== 'local' || !['enabled', 'disabledSites', 'mode', 'llm', 'pdf'].some(k => k in ch)) return;
+      if (area !== 'local' || !['enabled', 'disabledSites', 'mode', 'llm', 'pdf', 'rejects'].some(k => k in ch)) return;
       location.reload();
     });
   }

@@ -1,25 +1,43 @@
-name: Missed word
-description: A Swiss word or phrase the extension left unchanged (the popup's "Report a missed word" opens this, prefilled)
-title: "Missed: "
-labels: ["missed-word"]
+name: Mistake report
+description: A Swiss word the extension left alone, or a change it should not have made (the popup's "Report a mistake" opens this, prefilled)
+title: "Mistake: "
+labels: ["mistake-report"]
 body:
   - type: markdown
     attributes:
       value: |
         Reports like this are collected and used to patch the dictionary and rules.
         This issue is public: delete the page address below if the page is private.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - "Missed: left unchanged"
+        - "Wrong: changed, but should stay"
+    validations:
+      required: true
   - type: input
     id: word
     attributes:
       label: Word or phrase
-      description: Exactly as the page shows it.
+      description: As the site wrote it.
     validations:
       required: true
+  - type: input
+    id: changed
+    attributes:
+      label: What the extension changed it to
+      description: Wrong changes only.
   - type: input
     id: expected
     attributes:
       label: What it should be
-      description: The German Standard German replacement, if you know it.
+      description: Missed words only; the German Standard German replacement, if you know it.
+  - type: input
+    id: why
+    attributes:
+      label: Why it changed (from the hover card)
   - type: textarea
     id: context
     attributes:

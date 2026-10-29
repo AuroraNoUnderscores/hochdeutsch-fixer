@@ -13,6 +13,7 @@
   let pumping = false;
   let reported = '', reportTimer = null;
   let highlight = false;
+  let rejects = [];     // places the reader put back (engine.js, rejection)
 
   // Tell the background what this frame has done, so the popup can add up all
   // frames. Work often happens in an iframe the popup never talks to.
@@ -385,7 +386,7 @@
     if (!eligible(node)) return;
     const info = blockInfo(node);
     // Text already in German spelling keeps its ss and its German words.
-    const r = E.convert(node.nodeValue, { mode, meta: pageMeta, context: info.text, german: pageGerman || info.eszett, swiss: pageSwiss });
+    const r = E.convert(node.nodeValue, { mode, meta: pageMeta, context: info.text, german: pageGerman || info.eszett, swiss: pageSwiss, rejects });
     const choices = r.pieces.some(p => typeof p === 'object');
     if (!r.changes && !choices) return;
     const rec = { orig: node.nodeValue, conv: r.changes ? r.text : node.nodeValue, counted: r.changes, pieces: r.pieces };
@@ -486,12 +487,15 @@
   }
 
   async function sync() {
-    const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight']);
+    const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight', 'rejects']);
+    const newRejects = s.rejects || [];
+    const moved = JSON.stringify(newRejects) !== JSON.stringify(rejects);
+    rejects = newRejects;
     if (!!s.highlight !== highlight) { highlight = !!s.highlight; paint(); }
     const want = s.enabled !== false && !(s.disabledSites || []).includes(host);
     const newMode = s.mode || 'hamburg';
     const newLlm = s.llm !== false;
-    const reload = active && (newMode !== mode || (newLlm && !llm));
+    const reload = active && (newMode !== mode || (newLlm && !llm) || moved);
     mode = newMode;
     llm = newLlm;
     if (reload) stop();
@@ -512,9 +516,23 @@
     const i = text.indexOf(word);
     const context = i < 0 ? word : text.slice(Math.max(0, i - 80), i + word.length + 80).trim();
     // The address without query or fragment: those carry tokens and session ids.
+    // A change the reader selected (all or part of it): what the site wrote, what
+    // it became and why, with the text around the original, so it can be put back.
+    const wrong = [];
+    const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+    const node = range?.startContainer, rec = node && originals.get(node);
+    if (rec && node.nodeValue === rec.conv) {
+      const lo = range.startOffset, hi = range.endContainer === node ? range.endOffset : node.length;
+      for (const [a, b, from, to] of changesOf(rec)) {
+        if (!(a < Math.max(hi, lo + 1) && b > lo) || !from) continue;
+        let at = -1;                                  // the occurrence of `from` nearest to where it now stands
+        for (let i = rec.orig.indexOf(from); i >= 0; i = rec.orig.indexOf(from, i + 1)) if (at < 0 || Math.abs(i - a) < Math.abs(at - a)) at = i;
+        if (at >= 0) wrong.push({ ...E.rejection(rec.orig, at, at + from.length), to, note: why(rec, a, b, from, to) });
+      }
+    }
     let page = '';
     try { const u = new URL(location.href); page = /^https?:$/.test(u.protocol) ? u.origin + u.pathname : ''; } catch {}
-    return { word, context, page, lang: document.documentElement.lang || '' };
+    return { word, context, page, lang: document.documentElement.lang || '', wrong };
   }
 
   browser.storage.onChanged.addListener(sync);

@@ -1083,12 +1083,64 @@
     return swissSeen;
   }
 
+  // ---------- places the reader put back ----------
+  // A change reported as wrong stays undone at that place: the word, with the
+  // text around it, is kept in storage (rejection below) and convert holds it
+  // out of the conversion. Each held span is overwritten, for the passes, by a
+  // run of one private-use character of the same length (so nothing shifts and
+  // no pass can touch it) and written back into the result.
+  const CTX = 30;
+  const rejection = (text, a, b) => ({ from: text.slice(a, b), before: text.slice(Math.max(0, a - CTX), a), after: text.slice(b, b + CTX) });
+
+  // The text beside a held word agrees with what was stored when the characters
+  // next to it match as far as both go (a text node or paragraph may end sooner):
+  // how many matched, or -1.
+  const sameSide = (here, was, end) => {
+    const n = Math.min(here.length, was.length);
+    return (end ? here.slice(here.length - n) === was.slice(was.length - n) : here.slice(0, n) === was.slice(0, n)) ? n : -1;
+  };
+  function hold(text, rejects) {
+    const spans = [];
+    for (const r of rejects || []) {
+      if (!r?.from) continue;
+      const startsLetter = /^\p{L}/u.test(r.from), endsLetter = /\p{L}$/u.test(r.from);
+      for (let i = text.indexOf(r.from); i >= 0; i = text.indexOf(r.from, i + 1)) {
+        const j = i + r.from.length;
+        if ((startsLetter && /\p{L}/u.test(text.slice(i - 1, i))) || (endsLetter && /\p{L}/u.test(text.slice(j, j + 1)))) continue;
+        const before = r.before || '', after = r.after || '';
+        const b = sameSide(text.slice(Math.max(0, i - CTX), i), before, true);
+        const a = sameSide(text.slice(j, j + CTX), after, false);
+        if (b >= 0 && a >= 0 && (b + a >= 12 || (b === before.length && a === after.length))) spans.push([i, j, r.from]);
+      }
+    }
+    spans.sort((x, y) => x[0] - y[0]);
+    const kept = [];
+    for (const sp of spans) if (kept.length < 64 && (!kept.length || sp[0] >= kept[kept.length - 1][1])) kept.push(sp);
+    if (!kept.length) return null;
+    let out = '', at = 0;
+    kept.forEach(([i, j], k) => { out += text.slice(at, i) + String.fromCharCode(0xE000 + k).repeat(j - i); at = j; });
+    const back = str => typeof str !== 'string' ? str
+      : str.replace(/([\uE000-\uE03F])\1*/g, (run, ch) => kept[ch.charCodeAt(0) - 0xE000]?.[2] ?? run);
+    return { text: out + text.slice(at), back };
+  }
+
   function convert(text, opts = {}) {
     const t = tables(opts.mode || 'hamburg');
     // Pages and blocks explaining words keep their examples ("sagt man Velo",
     // "in der Mehrzahl zu Massen"); rewriting those would say the opposite.
     if (opts.meta || (opts.context ? isMetaJoined(opts.context, text) : isMeta(text)))
       return { text, changes: 0, fixed: 0, pieces: [text] };
+    const held = hold(text, opts.rejects);
+    if (held) {
+      const r = convert(held.text, { ...opts, rejects: null });
+      for (const p of r.pieces.keys()) {
+        const piece = r.pieces[p];
+        if (typeof piece === 'string') r.pieces[p] = held.back(piece);
+        else { piece.orig = held.back(piece.orig); piece.options = piece.options.map(held.back); }
+      }
+      r.pieces.source = held.back(r.pieces.source);
+      return { ...r, text: held.back(r.text) };
+    }
     let changes = 0;
     if (t.phraseRe) text = text.replace(t.phraseRe, m => { changes++; return t.phraseMap.get(m); });
     text = text.replace(THOUSANDS, (m, int, dec) => {
@@ -1289,7 +1341,7 @@
   }
   const isSwiss = (text, mode = 'neutral') => swissEvidence(tables(mode), text).swiss;
 
-  const api = { convert, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, swissSigns, isSwiss, segment, language, matchCase };
+  const api = { convert, rejection, candidates, renderPieces, choicesOf, explain, resolve, countChoices, isMeta, germanSpelling, swissSigns, isSwiss, segment, language, matchCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HD_ENGINE = api;
 })(globalThis);
