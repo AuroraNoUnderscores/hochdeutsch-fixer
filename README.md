@@ -416,6 +416,9 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
   A PDF with no text on its first pages (a scan) is handed back to Chrome's own
   viewer, which reads scans with OCR (this one cannot, and there is nothing in
   it to convert); the Chromium build does that for the address and remembers it.
+  Chromium: **Open this PDF in Chrome's viewer** (popup, on a PDF this extension
+  shows) does the same by hand for one PDF, as a way out of any PDF that does not
+  behave; **Use this extension's viewer for all PDFs again** takes those back.
 - **Report a mistake** (web pages and PDFs): select the word on the page, open the
   popup and press it. If the selection is a change the extension made, it offers
   *It changed something it should not have* (Masse → Maße, say): the change is put

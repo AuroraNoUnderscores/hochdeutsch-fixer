@@ -8,7 +8,7 @@ async function refresh() {
   let llm = null, tab_ = null;
   try { llm = await browser.runtime.sendMessage({ type: 'llm-status' }); } catch {}
   try { tab_ = await browser.runtime.sendMessage({ type: 'tab-count', tabId: tab.id }); } catch {}
-  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight', 'pdf']);
+  const s = await browser.storage.local.get(['enabled', 'disabledSites', 'mode', 'llm', 'highlight', 'pdf', 'nativePdfs']);
 
   $('enabled').checked = s.enabled !== false;
   $('mode').value = s.mode || 'hamburg';
@@ -16,6 +16,10 @@ async function refresh() {
   $('highlight').checked = !!s.highlight;
   $('pdf').checked = s.pdf !== false;
   showChanges(tab_);
+  // Chromium: a PDF this extension shows can be left to Chrome's own viewer instead,
+  // and the PDFs left to it so far can be taken back
+  $('native').hidden = !page?.native;
+  $('native-reset').hidden = !s.nativePdfs?.length;
 
   if (page) {
     host = page.host;
@@ -194,6 +198,15 @@ $('r-send').onclick = async () => {
   browser.tabs.create({ url: `${ISSUES}?${q}` });
 };
 
+$('native').onclick = async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  try { await browser.tabs.sendMessage(tab.id, 'hd-native'); } catch {}
+  window.close();
+};
+$('native-reset').onclick = async () => {
+  try { await browser.runtime.sendMessage({ type: 'pdf-native-reset' }); } catch {}
+  later();
+};
 $('highlight').onchange = e => browser.storage.local.set({ highlight: e.target.checked }).then(later);
 $('pdf').onchange = e => browser.storage.local.set({ pdf: e.target.checked });
 
