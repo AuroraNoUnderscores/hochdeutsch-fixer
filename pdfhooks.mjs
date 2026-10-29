@@ -139,10 +139,31 @@ function applyEdits(str, list) {
   return { str: out + str.slice(pos), marks };
 }
 
+// A PDF with no text on any of its first pages is a scan. Chrome's own viewer
+// reads those (it runs OCR), which this one cannot, and there is nothing here to
+// convert: so the build that can (pdfview.js, Chromium) hands the PDF back.
+let scanCheck = null;
+function scanned(page) {
+  scanCheck ||= (async () => {
+    const tr = page._transport;
+    let seen = 0;
+    for (let i = 1; i <= 5; i++) {
+      let p;
+      try { p = await tr.getPage(i); } catch { break; }       // past the last page
+      seen++;
+      const tc = await p.getTextContent({ __hdfxRaw: true });   // raw: the hook would come back to prepare
+      if (tc.items.some(it => typeof it.str === 'string' && /\S/.test(it.str))) return false;
+    }
+    return seen > 0;
+  })().catch(() => false);
+  return scanCheck;
+}
+
 function prepare(page) {
   const idx = page._pageIndex;
   if (!pages.has(idx)) {
     pages.set(idx, (async () => {
+      if (await scanned(page)) ask('image-only', {});
       const tc = await page.getTextContent({ __hdfxRaw: true, disableNormalization: true });
       const items = tc.items.filter(it => typeof it.str === 'string');
       const lite = items.map(it => ({ str: it.str, eol: !!it.hasEOL, t: it.transform, w: it.width, h: it.height, f: it.fontName, ff: tc.styles[it.fontName]?.fontFamily }));

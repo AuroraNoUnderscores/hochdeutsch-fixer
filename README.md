@@ -413,6 +413,9 @@ Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
 - **Show changed words**: the list of every change in the tab, all frames
   included ("Velo → Fahrrad ×4"), and the words kept as names.
 - **PDFs too**: off leaves PDFs to the browser's viewer, unconverted.
+  A PDF with no text on its first pages (a scan) is handed back to Chrome's own
+  viewer, which reads scans with OCR (this one cannot, and there is nothing in
+  it to convert); the Chromium build does that for the address and remembers it.
 - **Report a mistake** (web pages and PDFs): select the word on the page, open the
   popup and press it. If the selection is a change the extension made, it offers
   *It changed something it should not have* (Masse → Maße, say): the change is put
