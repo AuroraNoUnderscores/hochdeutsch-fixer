@@ -1117,10 +1117,16 @@
     const kept = [];
     for (const sp of spans) if (kept.length < 64 && (!kept.length || sp[0] >= kept[kept.length - 1][1])) kept.push(sp);
     if (!kept.length) return null;
+    // 64 private-use characters the text does not have (icon fonts use some)
+    let base = 0xE000;
+    const used = c => [...text].some(ch => ch.charCodeAt(0) >= c && ch.charCodeAt(0) < c + 64);
+    while (used(base)) if ((base += 64) > 0xF8FF - 63) return null;
+    const hex = c => '\\u' + c.toString(16).padStart(4, '0');
+    const runs = new RegExp(`([${hex(base)}-${hex(base + 63)}])\\1*`, 'g');
     let out = '', at = 0;
-    kept.forEach(([i, j], k) => { out += text.slice(at, i) + String.fromCharCode(0xE000 + k).repeat(j - i); at = j; });
+    kept.forEach(([i, j], k) => { out += text.slice(at, i) + String.fromCharCode(base + k).repeat(j - i); at = j; });
     const back = str => typeof str !== 'string' ? str
-      : str.replace(/([\uE000-\uE03F])\1*/g, (run, ch) => kept[ch.charCodeAt(0) - 0xE000]?.[2] ?? run);
+      : str.replace(runs, (run, ch) => kept[ch.charCodeAt(0) - base]?.[2] ?? run);
     return { text: out + text.slice(at), back };
   }
 
