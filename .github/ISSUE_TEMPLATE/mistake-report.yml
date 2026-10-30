@@ -8,13 +8,11 @@ body:
       value: |
         Reports like this are collected and used to patch the dictionary and rules.
         This issue is public: delete the page address below if the page is private.
-  - type: dropdown
+  - type: input
     id: kind
     attributes:
       label: Kind
-      options:
-        - "Missed: left unchanged"
-        - "Wrong: changed, but should stay"
+      description: "Missed: left unchanged, or Wrong: changed, but should stay"
     validations:
       required: true
   - type: input

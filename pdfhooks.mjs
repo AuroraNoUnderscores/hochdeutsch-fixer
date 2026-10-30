@@ -21,6 +21,8 @@ function ask(type, payload) {
     document.dispatchEvent(new CustomEvent('hdfx-pdf-req', { detail: JSON.stringify({ id, type, payload }) }));
   });
 }
+// a request nothing answers (the Firefox viewer does not act on all of them)
+const tell = (type, payload) => document.dispatchEvent(new CustomEvent('hdfx-pdf-req', { detail: JSON.stringify({ id: 0, type, payload }) }));
 // pdfview.js may ask for a page to be drawn again once the model has spoken
 document.addEventListener('hdfx-pdf-redraw', e => redraw(JSON.parse(e.detail)));
 
@@ -163,7 +165,7 @@ function prepare(page) {
   const idx = page._pageIndex;
   if (!pages.has(idx)) {
     pages.set(idx, (async () => {
-      if (await scanned(page)) ask('image-only', {});
+      if (await scanned(page)) tell('image-only', {});
       const tc = await page.getTextContent({ __hdfxRaw: true, disableNormalization: true });
       const items = tc.items.filter(it => typeof it.str === 'string');
       const lite = items.map(it => ({ str: it.str, eol: !!it.hasEOL, t: it.transform, w: it.width, h: it.height, f: it.fontName, ff: tc.styles[it.fontName]?.fontFamily }));
