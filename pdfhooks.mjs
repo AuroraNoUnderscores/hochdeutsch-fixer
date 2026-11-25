@@ -94,7 +94,7 @@ function buildKeys(items, edits) {
 // A line's new text begins with what a run draws (its keys): the rest of the
 // text, for the runs after it; or null. An accent drawn on its own (LaTeX draws
 // "ü" as "¨", then "u") is the accent of the letter next to it, before or after.
-const MARK = /\p{M}/u;
+const MARK = /\p{M}/u, MARKS = /^\p{M}+$/u;
 function keep(drawn, text) {
   // the text letter by letter, each with its accents still to be drawn
   const cl = [...text].map(cp => {
@@ -511,7 +511,7 @@ function canvas(page, operatorList) {
           more: more.map(m => m.wd * m.scale / perUser),
         });
       refitSoon();
-    } else if (now !== was && perUser) {
+    } else if (now !== was && perUser && !MARKS.test(k)) {
       // A changed word in a line that keeps its words. A longer one grows into
       // the free space at its piece's end (the rest of the piece moves on), then
       // into the word gaps of its run and of the runs after it on the piece,
@@ -544,6 +544,8 @@ function canvas(page, operatorList) {
       if (!endsPiece && extension) owe(id, extension / perUser, (extension > 0 ? extension - grow : full ? extension : 0) / perUser);
       else if (endsPiece) run.owed?.delete(id);
     } else if (!line) carryIn(clean, outItem);
+    // (an accent drawn on its own takes no room in its line: LaTeX sets the
+    // letter under it where the accent began, so dropping it moves nothing)
     if (!line && perUser && !partial) placed(state, glyphs, gItem, clean, outItem, scale, perUser, advOf, hits);
     return { glyphs: clean, scale, more };
   };

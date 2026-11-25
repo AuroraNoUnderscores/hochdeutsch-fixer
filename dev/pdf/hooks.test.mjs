@@ -140,5 +140,18 @@ check('a line in one run', one, ['Mit dem Fahrrad zur Arbeit.']);
   check('and take some of it back in their gaps, the last the least', moves.every((m, k) => !k || m <= moves[k - 1]) && moves[moves.length - 1] < moves[0], true);
 }
 
+// Computer Modern sets "ö" as "¨" placed over the "o", then the "o" where the
+// accent began: the accent takes no room in its line. Its run dropping (its
+// accent goes into the new "ö") must not pull the rest of the line over the
+// letters before it ("Messgrößen" read "Messgößen", "Ortskoordinaten" ran
+// into the "x" set apart from it).
+{
+  const drawn = await page(9, [['die Messgr¨', false, 72, 60], ['ossen und', false, 126, 45], ['x', true, 175, 6]], [
+    { i: 0, s: 4, e: 11, t: 'Messgr', lineLast: 2, room: 0 },
+    { i: 1, s: 0, e: 5, t: 'össen', lineLast: 2, room: 0 },
+  ], ['die Messgr', '¨', 'ossen und', 'x'], 'cm');
+  check('an accent on its own takes no room: nothing after it moves', drawn[3], null);
+}
+
 console.log(failures ? `${failures} failed` : 'all passed');
 process.exit(failures ? 1 : 0);

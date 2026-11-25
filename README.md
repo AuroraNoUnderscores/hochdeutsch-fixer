@@ -366,7 +366,9 @@ LaTeX in its old font encoding (no `fontenc`) draws "ü" as a "¨" set over a
 line keeps the pieces that read as before, accents included, and goes on in
 the piece where it changes, also when that is one of the line's later pieces;
 the letters such a font lacks ("ä", "ü") are its own accent over its own
-letter, as LaTeX sets them. Paragraphs there keep their line spacing, and a
+letter, as LaTeX sets them. An accent drawn on its own takes no room in its line
+(LaTeX's default font sets the letter under it where the accent began), so
+dropping it moves nothing after it (`dev/pdf/latex-cm.pdf`). Paragraphs there keep their line spacing, and a
 new one starts where a line is indented after one that ended short
 (`dev/pdf/latex.pdf`, from `latex.tex`).
 
