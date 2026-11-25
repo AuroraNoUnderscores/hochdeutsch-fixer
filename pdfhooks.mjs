@@ -165,6 +165,7 @@ function prepare(page) {
   const idx = page._pageIndex;
   if (!pages.has(idx)) {
     pages.set(idx, (async () => {
+      await loadFaces();
       if (await scanned(page)) tell('image-only', {});
       const tc = await page.getTextContent({ __hdfxRaw: true, disableNormalization: true });
       const items = tc.items.filter(it => typeof it.str === 'string');
@@ -195,7 +196,8 @@ function redraw({ page: idx, edits, version }) {
 // font. Letters the font does not have (a Swiss document's subset never has ß)
 // come from the installed font of the same family (styleOf below).
 const fontGlyphs = new Map();   // loadedName -> Map(char -> glyph)
-const measureCtx = new OffscreenCanvas(1, 1).getContext('2d');
+// (a canvas of the page's: it sees the fonts added to the page, fonts/)
+const measureCtx = (document.createElement ? document.createElement('canvas') : new OffscreenCanvas(1, 1)).getContext('2d');
 const SET_FONT = 37, SHOW_TEXT = 44;
 // how far a run may be squeezed to make room for a longer word, at most
 const MIN_SCALE = 0.85;
@@ -239,17 +241,37 @@ const FAMILIES = [
   [/^(texgyrecursor|tgcursor|nimbusmonl|pcr[rb])/i, '"Courier New", Courier, "TeX Gyre Cursor", "Nimbus Mono PS"'],
   [/^(texgyrebonum|bookman|urwbookman|pbk[lr])/i, '"Bookman Old Style", Bookman, "TeX Gyre Bonum", "URW Bookman"'],
   [/^(texgyreschola|centuryschoolbook|c059|pnc[rb])/i, '"Century Schoolbook", "TeX Gyre Schola", C059'],
-  [/^(lmroman|latinmodern|cmr|cmbx|cmti|cmsl|sfrm|cmuserif)/i, '"Latin Modern Roman", "CMU Serif", "Computer Modern", serif'],
-  [/^(lmsans|cmss|cmusans)/i, '"Latin Modern Sans", "CMU Sans Serif", sans-serif'],
+  // Computer Modern (cmr10, cmbx12, cmti10, the EC fonts ecrm1000 …, the CM-Super
+  // sfrm1000 …): from the subset of Latin Modern that comes with the extension
+  // (fonts/, tools/fonts.py), which hardly any computer has installed
+  [/^(cmss|lmsans|cmusans|sfss|ecss)/i, '"HDFX LM Sans", "Latin Modern Sans", "CMU Sans Serif", sans-serif'],
+  [/^(cmtt|cmitt|lmmono|cmutt|sftt|ectt)/i, '"HDFX LM Mono", "Latin Modern Mono", "CMU Typewriter Text", monospace'],
+  [/^(lmroman|latinmodern|cmr|cmb|cmti|cmsl|cmu|sfrm|sfbx|sfti|sfsl|ecrm|ecbx|ecti|ecsl|ecbi)/i, '"HDFX LM Roman", "Latin Modern Roman", "CMU Serif", serif'],
 ];
+// The letters Computer Modern documents lack, from Latin Modern (fonts/), loaded
+// once before the first page is drawn. Where the page's rules forbid it, the
+// installed fonts are used as before.
+const FACES = [['HDFX LM Roman', 'lmroman10-regular', 'normal', 'normal'], ['HDFX LM Roman', 'lmroman10-bold', 'bold', 'normal'],
+  ['HDFX LM Roman', 'lmroman10-italic', 'normal', 'italic'], ['HDFX LM Roman', 'lmroman10-bolditalic', 'bold', 'italic'],
+  ['HDFX LM Sans', 'lmsans10-regular', 'normal', 'normal'], ['HDFX LM Sans', 'lmsans10-bold', 'bold', 'normal'],
+  ['HDFX LM Sans', 'lmsans10-oblique', 'normal', 'italic'], ['HDFX LM Mono', 'lmmono10-regular', 'normal', 'normal']];
+let facesReady = null;
+const loadFaces = () => (facesReady ||= typeof FontFace === 'undefined' || !document.fonts?.add ? Promise.resolve()
+  : Promise.all(FACES.map(([family, file, weight, style]) => {
+    const face = new FontFace(family, `url(${new URL(`./fonts/${file}.woff2`, import.meta.url)})`, { weight, style });
+    document.fonts.add(face);
+    return face.load().catch(() => {});
+  })));
 const fontStyles = new Map();
 function styleOf(font) {
   let st = fontStyles.get(font.loadedName);
   if (st) return st;
   const name = String(font.name || '').replace(/^[A-Z]{6}\+/, '');
   const flat = name.replace(/[\s_-]/g, '');
-  const bold = font.black || /black|heavy/i.test(name) ? '900' : font.bold || /bold|semibold|demi/i.test(name) ? 'bold' : 'normal';
-  const italic = font.italic || /italic|oblique/i.test(name) ? 'italic' : 'normal';
+  // (Computer Modern says it in its name's letters: cmbx10 is bold, cmti10 italic, cmbxti10 both)
+  const cmBold = /^(?:cm|sf|ec)(?:bx|b\d|ssbx|ssdc|bi)/i.test(flat), cmItalic = /^(?:cm|sf|ec)[a-z]*?(?:ti|sl|itt|ssi|si|bi|it)\d/i.test(flat);
+  const bold = font.black || /black|heavy/i.test(name) ? '900' : font.bold || cmBold || /bold|semibold|demi/i.test(name) ? 'bold' : 'normal';
+  const italic = font.italic || cmItalic || /italic|oblique/i.test(name) ? 'italic' : 'normal';
   const known = FAMILIES.find(([re]) => re.test(flat))?.[1];
   const own = /^[\w ]+$/.test(name.split(/[-,]/)[0]) ? `"${name.split(/[-,]/)[0].replace(/(MT|PS|Std|Pro|LT)$/,'').trim()}", ` : '';
   const families = (known ? known + ', ' : own) + (font.fallbackName || 'sans-serif');

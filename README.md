@@ -285,7 +285,13 @@ outlined as the text around it is (Word draws its fake bold as both), and
 measured in the font's own units.
 
 Words of other lengths would leave lines squeezed or gappy, so a changed
-paragraph is typeset again: its words are broken into its lines anew, each as
+paragraph is typeset again, as little of it as it takes: its lines before the
+first changed one stay, and from there its words are broken into its lines
+anew, until a line starts where it started before with nothing changed after
+it, which stays, as do the lines after it. A word the PDF hyphenated at a
+line end, unchanged, may be hyphenated there again (nothing else is
+hyphenated), so a paragraph changing in its last line keeps all its others.
+The lines set anew are each as
 wide as before, justified lines stay justified, ragged ones may run to the
 column's edge, and a paragraph that grew takes another line below it when the
 space there is free. Paragraphs mixing fonts (a bold word inside) or with
@@ -387,8 +393,11 @@ whole), and a changed word is drawn with the PDF's own letter spacing
 (`dev/pdf/spaced.pdf`, `dev/pdf/smallprint.pdf`).
 
 Letters a subset font does not contain come from the installed font closest to
-it; LaTeX's TeX Gyre and URW fonts are matched to their originals (Pagella to
-Palatino, Termes to Times, Heros to Helvetica/Arial, Latin Modern).
+it, and for Computer Modern (cmr10, cmbx12, cmti10, the EC and CM-Super fonts),
+which hardly any computer has, from a subset of Latin Modern that comes with
+the extension (`fonts/`, `tools/fonts.py`, GUST Font License), bold and italic
+read from the font's name. LaTeX's TeX Gyre and URW fonts are matched to their
+originals (Pagella to Palatino, Termes to Times, Heros to Helvetica/Arial).
 
 ## Settings (toolbar popup)
 

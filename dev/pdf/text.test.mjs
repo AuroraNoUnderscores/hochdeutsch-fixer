@@ -40,14 +40,29 @@ const text = edits => edits.filter(e => e.t).map(e => e.t).join(' ');
   check('a hyphen before "und" stays, with its space', /Korrektur- und Verbesserungsvorschläge/.test(t), t);
   check('the paragraph is converted', /Fahrrad/.test(t), t);
 }
-// …while a word hyphenated at a line end is still one word.
+// …while a word hyphenated at a line end is still one word: it reads as one
+// ("Velo-" "weg" is a "Radweg") …
 {
   const edits = await convert([
-    ['Wir danken allen für die vielen Hinweise und das Velo, das hier im Verbesse-'],
-    ['rungsvorschlag zu diesem Skript genannt wird, das im Kanton gelesen wird.', 330],
+    ['Wir danken allen für die vielen Hinweise und für das Skript, das hier im Velo-'],
+    ['weg zu diesem Skript genannt wird, das im Kanton gelesen wird.', 330],
   ]);
   const t = text(edits);
-  check('a word hyphenated at a line end is joined', /Verbesserungsvorschlag/.test(t) && !/Verbesse- rungs/.test(t), t);
+  check('a word hyphenated at a line end is read as one word', /Radweg/.test(t) && !/Velo/.test(t), t);
+}
+// … and where the paragraph changes only further down, its lines above stay as
+// they are, hyphenated words included, and so do those below once a line
+// starts where it did.
+{
+  const edits = await convert([
+    ['Wir danken allen für die vielen Hinweise und das Material, das hier im Verbesse-'],
+    ['rungsvorschlag zu diesem Skript genannt wird, das im Kanton gelesen wird, und das'],
+    ['Offerte liegt heute vor dem Haus, und morgen liegt sie dort auch noch, sagen sie'],
+    ['Nachbarn steht seit gestern auch dort und das ist gut so, sagen alle hier im Ort.'],
+    ['Das ist das Ende.', 100],
+  ]);
+  const touched = [...new Set(edits.filter(e => e.line).map(e => e.i))];
+  check('only the lines a change reaches are set again', JSON.stringify(touched) === '[2]', JSON.stringify(touched) + ' ' + text(edits));
 }
 
 // 2. A justified paragraph that grows by more than its last line can take: the

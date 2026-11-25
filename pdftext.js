@@ -71,6 +71,7 @@ globalThis.HD_PDFTEXT = (() => {
     let text = '';
     const from = [];
     let spaced = false;
+    const joins = [];
     const add = (s, i, o) => { for (let k = 0; k < s.length; k++) { text += s[k]; from.push(i == null ? null : [i, o + k]); } };
     const addSpaced = (s, i) => {
       const letters = [], at = [];
@@ -104,10 +105,12 @@ globalThis.HD_PDFTEXT = (() => {
           // drop the hyphen (and spaces after it) from the text; the item keeps it
           const cut = text.length - m[0].length + 1;
           text = text.slice(0, cut); from.length = cut;
+          joins.push(cut);                     // where the word may break again (reflow)
         } else if (!/\s$/.test(text)) add(' ', null);
       }
     });
-    return { ...compose(text, from), para, items, spaced };
+    const c = compose(text, from);
+    return { ...c, joins: joins.map(j => c.at(j)), para, items, spaced };
   }
 
   // LaTeX documents in its old font encoding draw "ü" as "¨" with a "u" under
@@ -115,20 +118,22 @@ globalThis.HD_PDFTEXT = (() => {
   // letter, the word reads as written ("für"); the letter keeps both sources
   // (the third entry of its from), so an edit of it replaces both.
   const ACCENTS = { '¨': '\u0308', '´': '\u0301', 'ˆ': '\u0302', '˜': '\u0303', '˚': '\u030a', '¸': '\u0327', 'ˇ': '\u030c', '˘': '\u0306', '˙': '\u0307', '˝': '\u030b', '¯': '\u0304', '˛': '\u0328' };
+  // (at: where a position of the text before is in the text after)
   function compose(text, from) {
-    if (!/[¨´ˆ˜˚¸ˇ˘˙˝¯˛]/.test(text)) return { text, from };
+    if (!/[¨´ˆ˜˚¸ˇ˘˙˝¯˛]/.test(text)) return { text, from, at: k => k };
     let out = '';
-    const src = [];
+    const src = [], map = [];
     for (let k = 0; k < text.length; k++) {
+      map[k] = out.length;
       const mark = ACCENTS[text[k]], next = text[k + 1];
       const c = mark && next && /\p{L}/u.test(next) ? (next + mark).normalize('NFC') : '';
       if (c.length === 1) {
         out += c;
         src.push(from[k + 1] && from[k] ? [...from[k + 1], from[k]] : from[k + 1] || from[k]);
-        k++;
+        map[++k] = out.length - 1;
       } else { out += text[k]; src.push(from[k]); }
     }
-    return { text: out, from: src };
+    return { text: out, from: src, at: k => (k < map.length ? map[k] : out.length + k - map.length) };
   }
   const composeText = t => compose(t.replace(/([¨´ˆ˜˚¸ˇ˘˙˝¯˛]) (?=\p{L})/gu, '$1'), []).text;
 
@@ -297,7 +302,7 @@ globalThis.HD_PDFTEXT = (() => {
     };
   }
 
-  function reflow(items, { para, text: was, from: sources, spaced }, text, diffs, column, open) {
+  function reflow(items, { para, text: was, from: sources, spaced, joins }, text, diffs, column, open) {
     if (spaced) return null;                     // letter-spaced: its words keep their places
     const lines = para.map(l => l.filter(i => items[i].str.trim())).filter(l => l.length);
     if (!lines.length) return null;
@@ -322,106 +327,155 @@ globalThis.HD_PDFTEXT = (() => {
     const space = width(' ');
     const right = Math.max(...geo.map(g => g.x1));
     const justified = geo.length > 1 && geo.slice(0, -1).every(g => right - g.x1 < 2);
-    const words = text.trim().split(/\s+/);
-    // Which of the new words are changed ones, and where they are in a line of
-    // words a to b, for the highlights: [start, end, info] (what it was, why it
-    // changed); neighbours from one change are one mark with their space.
-    const changed = [...text.matchAll(/\S+/g)].map(m => {
+    // The new text's words, and where each may break as the PDF broke it: a
+    // word hyphenated at a line end, unchanged, may be hyphenated there again.
+    const wm = [...text.matchAll(/\S+/g)];
+    const words = wm.map(m => m[0]), startOf = wm.map(m => m.index);
+    // where a position of the text before is in the new text; null inside a change
+    const toNew = i => {
+      let delta = 0;
+      for (const d of diffs) {
+        if (d.e <= i && d.s < i) delta += (d.b - d.a) - (d.e - d.s);
+        else if (d.s < i) return null;
+      }
+      return i + delta;
+    };
+    const wordAt = pos => { let n = 0; while (n < words.length && startOf[n] + words[n].length <= pos) n++; return n; };
+    const splits = words.map(() => []);
+    for (const j of joins) {
+      const nj = toNew(j), n = nj == null ? -1 : wordAt(nj);
+      if (n >= 0 && n < words.length && nj > startOf[n]) splits[n].push(nj - startOf[n]);
+    }
+    // Which of the new words are changed ones, and where they are in a line,
+    // for the highlights: [start, end, info] (what it was, why it changed);
+    // neighbours from one change are one mark with their space.
+    const changed = wm.map(m => {
       const on = diffs.filter(d => d.a < m.index + m[0].length && d.b > m.index);
       if (!on.length) return null;
       const first = on[0], last = on[on.length - 1];
       const info = on.length === 1 ? first.info : { ...first.info, from: on.map(d => d.info.from).join(' … '), to: text.slice(first.a, last.b) };
       return [Math.max(0, first.a - m.index), Math.min(m[0].length, last.b - m.index), info];
     });
-    const marks = (a, b) => {
+    // A line is pieces of words: { n, a, b } (letters a to b of word n), and hy
+    // where it ends hyphenated.
+    const strOf = p => words[p.n].slice(p.a, p.b) + (p.hy ? '-' : '');
+    const textOf = take => take.map(strOf).join(' ');
+    const marks = take => {
       const out = [];
-      for (let n = a, at = 0; n < b; at += words[n++].length + 1) {
-        if (!changed[n]) continue;
-        const [lo, hi, info] = changed[n], last = out[out.length - 1];
-        if (last && lo === 0 && last[1] === at - 1 && last[2] === info) last[1] = at + hi; else out.push([at + lo, at + hi, info]);
+      let at = 0;
+      for (const p of take) {
+        const c = changed[p.n];
+        if (c) {
+          const lo = Math.max(c[0], p.a) - p.a, hi = Math.min(c[1], p.b) - p.a, last = out[out.length - 1];
+          if (hi > lo) { if (last && lo === 0 && last[1] === at - 1 && last[2] === c[2]) last[1] = at + hi; else out.push([at + lo, at + hi, c[2]]); }
+        }
+        at += strOf(p).length + 1;
       }
       return out;
     };
-    // Where a line's words a to b are set, as the canvas sets them (pdfhooks.mjs):
+    // Where a line's pieces are set, as the canvas sets them (pdfhooks.mjs):
     // [x from the line's start, width] each; justified to a width, or as they
     // come, narrowed to fit cap. For the text layer, word by word.
-    const place = (a, b, justify, cap) => {
-      if (b - a < 2) return undefined;
-      const ws = words.slice(a, b).map(width), sum = ws.reduce((p, q) => p + q, 0);
+    const place = (take, justify, cap) => {
+      if (take.length < 2) return undefined;
+      const ws = take.map(p => width(strOf(p))), sum = ws.reduce((p, q) => p + q, 0);
       const gap = justify ? (justify - sum) / (ws.length - 1) : space;
       const k = !justify && sum + gap * (ws.length - 1) > cap ? cap / (sum + gap * (ws.length - 1)) : 1;
       let x = 0;
       return ws.map(wd => { const at = x; x += (wd + gap) * k; return [+at.toFixed(2), +(wd * k).toFixed(2)]; });
     };
+    let w = 0, wo = 0;
     const fill = (cap, last) => {
-      const take = [], from = w;
+      const take = [];
       let used = 0;
       while (w < words.length) {
-        const add = width(words[w]) + (take.length ? space * (justified ? 0.85 : 1) : 0);
-        if (!last && take.length && used + add > cap * 1.002) break;
-        take.push(words[w++]);
-        used += add;
+        const a = wo, gap = take.length ? space * (justified ? 0.85 : 1) : 0;
+        const add = width(words[w].slice(a)) + gap;
+        if (!last && take.length && used + add > cap * 1.002) {
+          // the word broken where the PDF broke it, if its first part fits
+          const fit = splits[w].filter(j => j > a).sort((x, y) => y - x)
+            .find(j => used + gap + width(words[w].slice(a, j) + '-') <= cap * 1.002);
+          if (fit != null) { take.push({ n: w, a, b: fit, hy: true }); wo = fit; }
+          break;
+        }
+        take.push({ n: w, a, b: words[w].length });
+        used += add; w++; wo = 0;
       }
-      return { text: take.join(' '), used, from, to: w };
+      return take;
     };
-    let w = 0;
     const own = new Set(lines.flat());
     const size = Math.hypot(its[0].t[2], its[0].t[3]) || its[0].h || 10;
-    const out = geo.map((g, n) => {
-      const last = n === geo.length - 1;
+    // Each line's start and end in the text as read before.
+    const span = lines.map(l => {
+      const mine = new Set(l);
+      let a = -1, b = -1;
+      sources.forEach((f, k) => { if (f && (mine.has(f[0]) || (f[2] && mine.has(f[2][0])))) { if (a < 0) a = k; b = k + 1; } });
+      return [a, b];
+    });
+    // Lines before the first changed one stay as they are. From it, the words
+    // are set again, until a line starts where it started before with nothing
+    // changed after it: it and the lines after it stay too.
+    const startOf_ = n => span[n][0];
+    const changedLine = n => diffs.some(d => d.s < (span[n + 1]?.[0] ?? Infinity) && (d.e > span[n][0] || d.s >= span[n][0]));
+    let firstLine = geo.findIndex((g, n) => span[n][0] >= 0 && changedLine(n));
+    if (firstLine < 0) return [];
+    const begin = toNew(startOf_(firstLine)) ?? Math.min(...diffs.filter(d => d.e > startOf_(firstLine)).map(d => d.a));
+    w = wordAt(begin); wo = w < words.length ? Math.max(0, begin - startOf[w]) : 0;
+    const out = [];
+    let stopped = false;
+    for (let n = firstLine; n < geo.length; n++) {
+      if (n > firstLine && span[n][0] >= 0 && diffs.every(d => d.e <= span[n][0] && d.s < span[n][0])) {
+        const at = toNew(span[n][0]);
+        if (w >= words.length || at === startOf[w] + wo) { stopped = true; break; }
+      }
+      const g = geo[n], last = n === geo.length - 1;
       const edge = geo.length === 1 && open ? Math.max(column(g.x0), open(g, own, size)) : column(g.x0);
       const cap = justified && !last ? g.x1 - g.x0 : edge - g.x0;
-      const { text: t, from, to } = fill(cap, false);
-      return { line: n, text: t, from, to, justify: justified && !last, width: g.x1 - g.x0, cap };
-    });
+      out.push({ line: n, take: fill(cap, false), justify: justified && !last, width: g.x1 - g.x0, cap });
+    }
     // Words left over: the paragraph needs more lines. They go below it if
     // nothing else is there (and the overflow is worth a line); otherwise the
     // last line takes them and is squeezed a little.
     const more = [];
-    if (w < words.length) {
+    if (!stopped && w < words.length && out.length) {
       const lastGeo = geo[geo.length - 1], lastOut = out[out.length - 1];
-      const rest = words.slice(w).join(' ');
+      const restTake = [{ n: w, a: wo, b: words[w].length }, ...words.slice(w + 1).map((_, k) => ({ n: w + 1 + k, a: 0, b: words[w + 1 + k].length }))];
       const leading = geo.length > 1 ? Math.abs(geo[0].y - geo[geo.length - 1].y) / (geo.length - 1) : size * 1.2;
       const cap = column(lastGeo.x0) - lastGeo.x0;
       const free = n => !items.some((it, i) => !own.has(i) && it.str.trim()
         && it.t[5] < lastGeo.y - 0.5 && it.t[5] > lastGeo.y - leading * (n + 0.6)
         && it.t[4] < lastGeo.x0 + cap && it.t[4] + it.w > lastGeo.x0);
       const lines2 = [];
-      let left = words.slice(w), at = w;
+      let left = restTake.slice();
       while (left.length) {
         const take = [];
         let used = 0;
         while (left.length) {
-          const add = width(left[0]) + (take.length ? space : 0);
+          const add = width(strOf(left[0])) + (take.length ? space : 0);
           if (take.length && used + add > cap) break;
           take.push(left.shift()); used += add;
         }
-        lines2.push({ text: take.join(' '), marks: marks(at, at + take.length), xs: place(at, at + take.length, null, cap) });
-        at += take.length;
+        lines2.push({ text: textOf(take), marks: marks(take), xs: place(take, null, cap) });
       }
-      if (width(rest) > cap * 0.03 && free(lines2.length)) {
+      if (width(textOf(restTake)) > cap * 0.03 && free(lines2.length)) {
         // the old last line is now a full line of the paragraph
         // (justified, it is as wide as the paragraph's other lines, not as it was)
         if (justified || geo.length === 1) Object.assign(lastOut, { justify: justified, ...(justified ? { width: right - lastGeo.x0 } : {}) });
         lines2.forEach((l, n) => more.push({ dy: -leading * (n + 1), ...l, cap }));
-      } else {
-        lastOut.text = [lastOut.text, rest].filter(Boolean).join(' ');
-        lastOut.to = words.length;
-      }
+      } else lastOut.take = [...lastOut.take, ...restTake];
     }
     const edits = [];
-    out.forEach(({ line, text: t, from, to, justify, width: lw, cap }, n) => {
-      const l = lines[line];
-      // the line as read before (accents composed, as its paragraph was read)
-      const mine = new Set(l);
-      let a = -1, b = -1;
-      sources.forEach((f, k) => { if (f && (mine.has(f[0]) || (f[2] && mine.has(f[2][0])))) { if (a < 0) a = k; b = k + 1; } });
-      const orig = a < 0 ? '' : was.slice(a, b).replace(/\s+/g, ' ').trim();
+    out.forEach(({ line, take, justify, width: lw, cap }, n) => {
+      const l = lines[line], t = textOf(take);
+      // the line as read before (accents composed, as its paragraph was read; a
+      // word broken at its end with its hyphen)
+      const [a, b] = span[line];
+      const orig = a < 0 ? '' : was.slice(a, b).replace(/\s+/g, ' ').trim() + (joins.includes(b) ? '-' : '');
       const extra = n === out.length - 1 && more.length ? more : null;
       if (orig === t && !extra) return;             // this line reads as before
-      const xs = place(from, to, justify ? lw : null, cap);
+      const xs = place(take, justify ? lw : null, cap);
       l.forEach((i, j) => edits.push(j === 0
-        ? { i, s: 0, e: items[i].str.length, t, marks: marks(from, to), line: { justify, width: lw, cap, ...(xs ? { xs } : {}), ...(extra ? { more: extra } : {}) }, of: l[0] }
+        ? { i, s: 0, e: items[i].str.length, t, marks: marks(take), line: { justify, width: lw, cap, ...(xs ? { xs } : {}), ...(extra ? { more: extra } : {}) }, of: l[0] }
         : { i, s: 0, e: items[i].str.length, t: '', of: l[0] }));
     });
     return edits;
