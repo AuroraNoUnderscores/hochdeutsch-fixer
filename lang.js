@@ -44,8 +44,12 @@
   const KNOWN = 5;
 
   // Per language, -log10 P(text | language), and the words read.
-  // known(word): is this a German word the lists may not know?
-  function costs(text, known) {
+  // known(word): is this a German word the lists may not know? By default it
+  // costs at most KNOWN in German. With neutral, it costs the same in every
+  // language instead, what it costs in its likeliest: it does not vote. Telling
+  // languages apart, a Swiss word says nothing: English writes "the lavabo",
+  // "by Velo", "a Poulet lunch" too, so the words around it decide.
+  function costs(text, known, neutral = false) {
     if (!tables) build();
     const out = Object.fromEntries(LANGS.map(l => [l, 0]));
     let n = 0;
@@ -57,18 +61,20 @@
         if (cache.size > 20000) cache.clear();
         cache.set(w, c);
       }
-      LANGS.forEach((l, k) => { out[l] += l === 'de' && known?.(m) ? Math.min(c[k], KNOWN) : c[k]; });
+      const own = known?.(m);
+      const low = own && neutral ? Math.min(...c) : 0;
+      LANGS.forEach((l, k) => { out[l] += !own ? c[k] : neutral ? low : l === 'de' ? Math.min(c[k], KNOWN) : c[k]; });
       n++;
     }
     return { costs: out, words: n };
   }
 
   // The likeliest language, and by how much (log10) German is behind it, or
-  // ahead of the next one. prior: log10 odds per language from around the text
+  // ahead of the next one. known words do not vote (costs, neutral). prior: log10 odds per language from around the text
   // (the block a sentence is in), added to its own. Text without words is
   // German: there is nothing to say otherwise.
   function detect(text, prior = null, known = null) {
-    const { costs: c, words } = costs(text, known);
+    const { costs: c, words } = costs(text, known, true);
     const score = l => -c[l] + (prior?.[l] ?? 0);
     const ranked = [...LANGS].sort((a, b) => score(b) - score(a));
     const best = ranked[0];

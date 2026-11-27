@@ -85,9 +85,13 @@ from how often each language uses each of its words (naive Bayes over the most
 frequent words of German, English, French and Italian, `lang_data.js`, built by
 `tools/lang_build.py` from [wordfreq](https://github.com/rspeer/wordfreq),
 data CC BY-SA 4.0). A word on no list is read by its spelling, letter trigram
-by trigram, so "Velostation" reads German and "offertory" English; the
-dictionary's Swiss words count as German words. Words both languages have
-("was", "man", "die", "will", "hat") weigh what they weigh in each.
+by trigram, so "Velostation" reads German and "offertory" English. The
+dictionary's Swiss words do not vote: English writes "the lavabo", "by Velo",
+"a Poulet lunch" too, so the words around them decide, and a word on its own
+(a link, a table cell) goes with its block. Words both languages have
+("was", "man", "die", "will", "hat") weigh what they weigh in each. An element
+the page marks as another language (`<span lang="en">`) is left alone unless
+it plainly reads German.
 
 It decides at three levels. A block is converted when it reads as German. In
 it, a sentence that reads as another language is left alone; a sentence is
@@ -104,7 +108,13 @@ such a run goes with it ("Mass Effect", "Gross margin", "Store locator"); one
 after it does not ("eine faire Offerte"), nor one joined to it by a hyphen
 ("Töff-Crack"). A compound
 built on a Swiss word changes only where the rest is made of German words
-("Velo|weg|netz"), not "Offert|ory" or "Offert|orium".
+("Velo|weg|netz"), or of one too rare for the lists that plainly reads German
+("Poulet|geschnetzeltes"), not "Offert|ory" or "Offert|orium". A Swiss
+diminutive at its end takes the German one ("Pouletspiessli" →
+"Hähnchenspießchen"; after -el the plain word, "Hähnchenflügel"), and on a
+menu in capitals ("POULETBRUST") it is a compound all the same. Text in
+capitals goes to the model capitalised word by word ("Gyros Vom Poulet"):
+written in capitals, every word looks like a name to it.
 
 Measured on sentences none of it was built from (`tools/lang_eval.js`: the test sets
 of Universal Dependencies treebanks, and the Swiss sentences the rules change),

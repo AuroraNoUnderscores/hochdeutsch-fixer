@@ -334,22 +334,49 @@
 
   function compound(t, w) {
     const lower = w.toLowerCase();
+    const caps = allCaps(w);      // "POULETBRUST" on a menu: no camel case to go by
     for (const c of t.compounds) {
       const n = c.head.length;
-      if (w.length - n < 3 || !lower.startsWith(c.head) || isUpper(w[n])) continue;
+      if (w.length - n < 3 || !lower.startsWith(c.head) || (!caps && isUpper(w[n]))) continue;
       if (c.ex && c.ex.test(lower)) continue;
+      // a Swiss diminutive at the end, "Poulet|flügeli": German "-chen"
+      let rest = w.slice(n);
+      const dim = diminutive(lower.slice(n));
+      if (dim) rest = caps ? dim.toUpperCase() : dim;
       // a compound only where the rest is German: "Velo|station", not "Offert|ory"
-      if (!germanPart(lower.slice(n))) continue;
+      else if (!germanPart(lower.slice(n))) continue;
       // "velofreundlich" stays an adjective: "fahrradfreundlich", not "Fahrradfreundlich"
       const repl = isUpper(w[0]) ? c.repl : c.repl[0].toLowerCase() + c.repl.slice(1);
-      return matchCase(w.slice(0, n), repl) + w.slice(n);
+      return matchCase(w.slice(0, n), repl) + rest;
     }
+  }
+
+  // The last part of a compound as a Swiss diminutive: "spiessli", "brüstli"
+  // (from Brust: the umlaut is the diminutive's, as in "-chen"), and its
+  // German form: "spießchen", "brüstchen". After ch or g, a
+  // "-lein" ("bächlein"). Only where the stem is a German word.
+  function diminutive(rest) {
+    // after -el only an "i": "Flügel|i", "Schenkel|i"; German menus keep the
+    // plain word there ("Hähnchenflügel", not "-flügelchen")
+    if (!L) return null;
+    const el = /^(.{2,}el)is?$/.exec(rest);
+    if (el && germanWord(el[1])) return el[1];
+    const m = /^(.{3,}?)lis?$/.exec(rest);
+    if (!m) return null;
+    const stem = m[1];
+    const plain = stem.replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u');
+    if (![stem, plain].some(x => L.german(x) || L.german(fixSS(x)))) return null;
+    return fixSS(stem) + (/(ch|g)$/.test(stem) ? 'lein' : 'chen');
   }
 
   // A part of a compound: German words, joined as German joins them, with a
   // linking s, n, e or en between ("Velo|station", "Velo|weg|netz", "Offert|en|
   // anfrage"); not "Offert|ory" or "Offert|orium", which no German words make.
   const LINK = ['', 's', 'es', 'n', 'en', 'e'];
+  // how clearly (log10 odds) a part no list knows must read German
+  const RARE_PART = 3;
+  const readsGerman = w => { const r = L.detect(w); return r.lang === 'de' && r.margin >= RARE_PART; };
+  const germanWord = w => L.german(w) || (w.length >= 5 && readsGerman(w));
   const partCache = new Map();
   function germanPart(rest) {
     if (!L) return true;
@@ -362,8 +389,9 @@
         if (!L.german(rest.slice(i, j))) continue;
         ok[i] = LINK.some(l => rest.startsWith(l, j) && ok[j + l.length]);
       }
-    // a linking element right after the Swiss part ("Offert|en|anfrage")
-    const res = ok[0] || LINK.some(l => l && rest.startsWith(l) && ok[l.length]);
+    // a linking element right after the Swiss part ("Offert|en|anfrage"); or a
+    // word too rare for the lists that plainly reads German ("geschnetzeltes")
+    const res = ok[0] || LINK.some(l => l && rest.startsWith(l) && ok[l.length]) || (rest.length >= 6 && readsGerman(rest));
     if (partCache.size > 5000) partCache.clear();
     partCache.set(rest, res);
     return res;
@@ -1210,7 +1238,7 @@
     // All ss decisions and name checks of a text go to the eszett model in one pass.
     if (eszettPieces.length || namePieces.length) {
       const offsets = eszettPieces.flatMap(p => ssPairs(p.word).map(i => p.at + i));
-      jobs.push({ type: 'eszett', text: pieces.source, offsets, spans: namePieces.map(p => p.name) });
+      jobs.push({ type: 'eszett', text: modelCase(pieces.source), offsets, spans: namePieces.map(p => p.name) });
     }
     if (!jobs.length) return false;
     const picks = await rank(jobs);
@@ -1229,6 +1257,19 @@
       moved = true;
     });
     return moved;
+  }
+
+  // Capitals as the model knows them. Written all in capitals ("GYROS VOM
+  // POULET" on a menu), every word looks like a name or an abbreviation to it:
+  // "POULET" is a place to it at 0.87, "Gyros Vom Poulet" at 0.00. So such words
+  // go to it capitalised: of four letters or more, or two or more in a row
+  // (a lone "SBB" stays). Same length, so every offset still holds.
+  const CAPS_RUN = /\p{Lu}{2,}(?:[\s\-/&,.]+\p{Lu}{2,})+|\p{Lu}{4,}/gu;
+  function modelCase(text) {
+    return text.replace(CAPS_RUN, run => run.replace(/\p{Lu}{2,}/gu, w => {
+      const t = w[0] + w.slice(1).toLowerCase();
+      return t.length === w.length ? t : w;
+    }));
   }
 
   // The model marks names; a word the rules changed inside one goes back to how it

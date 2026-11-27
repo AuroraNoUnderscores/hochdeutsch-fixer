@@ -329,6 +329,7 @@
   const MENTION = 'em,i,q,cite,dfn,abbr,var';
   const BLOCK = 'p,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dd,dt,section,article,main,div,body';
   const blocks = new WeakMap();
+  const taggedGerman = new WeakMap();   // element with a lang of its own: reads German?
 
   // A text node as the site wrote it, not as this extension changed it: the
   // spelling check must not count the ß written here.
@@ -371,8 +372,20 @@
     if (mention && mention.textContent.trim().split(/\s+/).length <= 3) return false;
     // A page's lang is often its interface language, not the text's: webmail
     // shows German mail inside lang="en". So German-looking text counts too.
-    const lang = el.closest('[lang]')?.lang;
+    const tagged = el.closest('[lang]');
+    const lang = tagged?.lang;
     if (lang && /^(de|gsw)\b/i.test(lang)) return true;
+    // Inside the page, an element marked as another language ("<span
+    // lang="en">long ass</span>", a French quote) is that language: its author
+    // said so. Unless it plainly reads German, sentences of it (a leftover tag).
+    if (lang && tagged !== document.documentElement && tagged !== document.body) {
+      let ok = taggedGerman.get(tagged);
+      if (ok === undefined) {
+        const r = E.language(visibleText(tagged, 600));
+        taggedGerman.set(tagged, ok = r.lang === 'de' && r.words >= 6);
+      }
+      return ok;
+    }
     return blockInfo(node).german;
   }
 

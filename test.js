@@ -21,6 +21,18 @@ const cases = [
   ['pneumatisch und Pneuwechsel', 'pneumatisch und Reifenwechsel'],
   ['VELO', 'FAHRRAD'],
 
+  // compounds: a last part too rare for the word lists, capitals, Swiss diminutives (issue 16)
+  ['Pouletgeschnetzeltes mit Reis', 'Hähnchengeschnetzeltes mit Reis'],
+  ['Rindsgeschnetzeltes', 'Rindergeschnetzeltes'],
+  ['GYROS VOM POULET', 'GYROS VOM HÄHNCHEN'],
+  ['POULETBRUST AN RAHMSAUCE', 'HÄHNCHENBRUST AN SAHNESAUCE'],
+  ['NATELNUMMER', 'HANDYNUMMER'],
+  ['Pouletflügeli und Pouletschenkeli', 'Hähnchenflügel und Hähnchenschenkel'],
+  ['Pouletspiessli', 'Hähnchenspießchen'],
+  ['Pouletbrüstli', 'Hähnchenbrüstchen'],
+  ['Pouletnuggets', 'Pouletnuggets'],
+  ['Offertory', 'Offertory'],
+
   // declension: gender, case and number after the swap
   ['Der Entscheid fällt morgen.', 'Die Entscheidung fällt morgen.'],
   ['Wir haben den Entscheid getroffen.', 'Wir haben die Entscheidung getroffen.'],
@@ -228,6 +240,21 @@ const cases = [
     'Then of course there are so called historians, like the man you mentioned over the phone, Ed. K. Gross etc.', 'neutral',
     { context: 'Die Gemeinde informiert über die neuen Öffnungszeiten der Verwaltung und die Termine im kommenden Monat.' }],
 
+  // a Swiss word does not make English, French or Italian German: the words around it decide
+  ['Our trip: Zürich to Bern by Velo, then a Poulet lunch.', 'Our trip: Zürich to Bern by Velo, then a Poulet lunch.'],
+  ['The bathroom has a lavabo and a shower.', 'The bathroom has a lavabo and a shower.'],
+  ['That was a big ass Velo.', 'That was a big ass Velo.'],
+  ['Le lavabo est dans la salle de bain.', 'Le lavabo est dans la salle de bain.'],
+  // one word of a text (a link, a table cell, an italic word) goes with its block
+  ['Lavabo', 'Lavabo', 'neutral', { context: 'Bathroom fittings: ceramic, white, sixty centimetres wide, with a mirror cabinet above it.' }],
+  ['ass', 'ass', 'neutral', { context: 'We drove through the Gotthard and it was a long ass tunnel, honestly took forever.' }],
+  ['Lavabo', 'Waschbecken', 'neutral', { context: 'Im Badezimmer gibt es eine Dusche, ein WC und einen Spiegelschrank.' }],
+  // the rite, and Latin quoting it (issue 11)
+  ['Lavabo inter innocentes manus meas…', 'Lavabo inter innocentes manus meas…'],
+  ['Im Mittelalter lässt sich ein Lavabo parallel zur Übertragung der Gaben nachweisen.', 'Im Mittelalter lässt sich ein Lavabo parallel zur Übertragung der Gaben nachweisen.', 'neutral',
+    { context: 'Lavabo (von lateinisch lavare, „waschen“) bezeichnet den Ritus der symbolischen Händewaschung des Priesters in der Heiligen Messe.' }],
+  ['Das Lavabo ist kaputt.', 'Das Waschbecken ist kaputt.'],
+
   // agreement without an article, and around adverbs
   ['Antrag und Umschreibung Führerausweises', 'Antrag und Umschreibung Führerscheins'],
   ['die daraus folgende Limite', 'das daraus folgende Limit'],
@@ -257,5 +284,16 @@ for (const [input, want, mode = 'neutral', options = {}] of cases) {
   const got = E.convert(input, { mode, ...options }).text;
   if (got !== want) { fail++; log(`FAIL [${mode}]\n  in:   ${input}\n  want: ${want}\n  got:  ${got}`); }
 }
-log(`${cases.length - fail}/${cases.length} passed`);
+// the model reads a text in capitals as it reads ordinary text: capitalised
+// ("POULET" is a place to it, "Poulet" is not), every offset where it was
+let total = cases.length;
+for (const [input, want] of [['GYROS VOM POULET', 'Gyros Vom Poulet'], ['Die SBB fahren', 'Die SBB fahren'],
+                             ['Mit dem VELO fahren', 'Mit dem Velo fahren']]) {
+  total++;
+  let seen = input;   // nothing to ask: nothing sent
+  const r = E.convert(input, { mode: 'neutral' });
+  E.resolve(r.pieces, jobs => { seen = jobs.find(j => j.type === 'eszett')?.text ?? input; return Promise.resolve(null); });
+  if (seen !== want) { fail++; log(`FAIL model text\n  in:   ${input}\n  want: ${want}\n  got:  ${seen}`); }
+}
+log(`${total - fail}/${total} passed`);
 if (typeof process !== 'undefined') process.exit(fail ? 1 : 0);
